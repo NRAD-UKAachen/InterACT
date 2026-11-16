@@ -1,0 +1,150 @@
+# iRODS data management (Compose profile: irods).
+#
+# Part of the InterACT Compose project -- start it from the repo root
+# (`docker compose --profile irods up -d`), not from this directory. All values
+# come from the root .env; see .env.example.
+
+# Proxy settings, declared rather than inherited. A daemon-level proxy in
+# ~/.docker/config.json is injected into every container Docker creates, with
+# its own NO_PROXY (localhost only) -- so without this block the HTTP API's
+# Keycloak token introspection leaves through the corporate proxy instead of
+# going straight to PUBLIC_HOST. Both cases: Python and most clients read the
+# lowercase names.
+x-proxy-env: &proxy-env
+  HTTP_PROXY: "${INTERACT_HTTP_PROXY:-}"
+  HTTPS_PROXY: "${INTERACT_HTTPS_PROXY:-}"
+  http_proxy: "${INTERACT_HTTP_PROXY:-}"
+  https_proxy: "${INTERACT_HTTPS_PROXY:-}"
+  NO_PROXY: "${INTERACT_NO_PROXY:-}"
+  no_proxy: "${INTERACT_NO_PROXY:-}"
+
+services:
+  irods-catalog:
+    build:
+      context: ./catalog
+    container_name: ${STACK_NAME:-interact}-irods-catalog
+    profiles: ["irods", "all"]
+    environment:
+      POSTGRES_PASSWORD: ${IRODS_POSTGRES_PASSWORD:?Set IRODS_POSTGRES_PASSWORD in the root .env}
+      IRODS_DB_PASSWORD: ${IRODS_DB_PASSWORD}
+    volumes:
+      - irods_pgdata:/var/lib/postgresql/data
+    networks:
+      - interact-irods
+    restart: unless-stopped
+
+  irods-catalog-provider:
+    build:
+      context: ./catalog_provider
+    container_name: ${STACK_NAME:-interact}-irods-catalog-provider
+    # Pinned, and load-bearing. entrypoint.sh substitutes $HOSTNAME into the
+    # unattended-install config, and iRODS stores that as the resource's host
+    # (r_resc_main.resc_net) when the zone is first created. Docker otherwise
+    # sets $HOSTNAME to the CONTAINER ID, so the catalogue ends up pointing at
+    # a container that no longer exists the moment this one is recreated --
+    # setup_irods.py's post-install test_put then fails and the server never
+    # starts. A stable name survives recreation.
+    hostname: irods-catalog-provider
+    profiles: ["irods", "all"]
+    shm_size: 500mb
+    environment:
+      IRODS_ZONE_NAME: ${IRODS_ZONE_NAME}
+      IRODS_RESOURCE_NAME: ${IRODS_RESOURCE_NAME}
+      IRODS_ADMIN_PASSWORD: ${IRODS_ADMIN_PASSWORD:?Set IRODS_ADMIN_PASSWORD in the root .env}
+      IRODS_DB_PASSWORD: ${IRODS_DB_PASSWORD:?Set IRODS_DB_PASSWORD in the root .env}
+    volumes:
+      - irods_vault:/var/lib/irods/Vault
+    # Native iRODS protocol, for icommands (iput/irsync) from trusted hosts on
+    # the internal network -- e.g. bulk cohort transfers that shouldn't route
+    # through the HTTP API. Not needed by docker-context-gui (that talks to
+    # irods-http-api over interact-irods only). Host side is PORT_IRODS_NATIVE
+    # (not hardcoded) so a second stack on this host doesn't collide.
+    # Bound to IRODS_NATIVE_BIND, loopback by default: set it to 0.0.0.0 (or
+    # one interface's address) in the root .env only once those trusted hosts
+    # actually need it. Docker-published ports bypass host firewalls like ufw.
+    ports:
+      - "${IRODS_NATIVE_BIND:-127.0.0.1}:${PORT_IRODS_NATIVE:-1247}:1247"
+    healthcheck:
+      test: ["CMD", "su", "-", "irods", "-c", 'echo -e "\x00\x00\x00\x33<MsgHeader_PI><type>HEARTBEAT</type></MsgHeader_PI>" | (exec 3<>/dev/tcp/127.0.0.1/1247; cat >&3; cat <&3; exec 3<&-)']
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      start_interval: 10s
+    restart: unless-stopped
+    depends_on:
+      - irods-catalog
+    networks:
+      - interact-irods
+
+  # OAuth Protected Resource in front of iRODS. docker-context-gui forwards the
+  # end user's Keycloak access token as a Bearer token; this service introspects
+  # it against Keycloak and maps the "preferred_username" claim to an iRODS user,
+  # then carries out the request AS that user. No host port: the only consumer is
+  # docker-context-gui over interact-irods. Publish 9000 temporarily if you want
+  # to point curl or the Zone Management Tool at it.
+  irods-http-api:
+    image: irods/irods_http_api:0.6.0
+    container_name: ${STACK_NAME:-interact}-irods-http-api
+    profiles: ["irods", "all"]
+    environment:
+      <<: *proxy-env
+      IRODS_ZONE_NAME: ${IRODS_ZONE_NAME:-interactZone}
+      IRODS_ADMIN_PASSWORD: ${IRODS_ADMIN_PASSWORD:?Set IRODS_ADMIN_PASSWORD in the root .env}
+      # Must be the exact issuer Keycloak stamps into its tokens, minus the
+      # /.well-known/openid-configuration suffix (the HTTP API appends that).
+      OIDC_PROVIDER_URL: ${KEYCLOAK_BASE_URL}/realms/interact-realm
+      OIDC_CLIENT_ID: ${IRODS_OIDC_CLIENT_ID:-irods-http-api}
+      OIDC_CLIENT_SECRET: ${IRODS_OIDC_CLIENT_SECRET:?Set IRODS_OIDC_CLIENT_SECRET in the root .env}
+    volumes:
+      - ./http_api/config.json.template:/config.json.template:ro
+    # The image ships no envsubst, so sed the secrets in from the environment at
+    # start-up rather than committing a filled-in config.json.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        sed -e "s|@IRODS_ZONE_NAME@|$${IRODS_ZONE_NAME}|g" \
+            -e "s|@IRODS_ADMIN_PASSWORD@|$${IRODS_ADMIN_PASSWORD}|g" \
+            -e "s|@OIDC_PROVIDER_URL@|$${OIDC_PROVIDER_URL}|g" \
+            -e "s|@OIDC_CLIENT_ID@|$${OIDC_CLIENT_ID}|g" \
+            -e "s|@OIDC_CLIENT_SECRET@|$${OIDC_CLIENT_SECRET}|g" \
+            /config.json.template > /tmp/config.json
+        exec irods_http_api /tmp/config.json
+    # Keycloak lives on another Docker network but is reachable on the host port.
+    # The hostname must match the "issuer" Keycloak puts in its tokens exactly,
+    # so use the same PUBLIC_HOST the Flask app uses - not a container alias.
+    extra_hosts:
+      - "${PUBLIC_HOST}:host-gateway"
+    # /info needs no auth and reports the zone and whether OIDC came up.
+    # --no-proxy matters: wget in this image otherwise picks up a proxy and
+    # tries to reach its own loopback address through it.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--no-proxy", "--tries=1",
+             "--timeout=5", "http://127.0.0.1:9000/irods-http-api/0.6.0/info"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    depends_on:
+      irods-catalog-provider:
+        condition: service_healthy
+    networks:
+      - interact-irods
+
+# Declared identically in every stack file and in the root docker-compose.yml.
+# `include:` merges these top-level blocks, so they must agree exactly; the
+# shared names replace the old project-prefixed `nginx-dcm4chee_default`.
+networks:
+  interact-irods:
+    name: ${STACK_NAME:-interact}-irods
+    driver: bridge
+
+# Explicit names, like the networks -- see the comment in
+# keycloak-dev/docker-compose.yml. The vault holds the actual stored objects.
+volumes:
+  irods_pgdata:
+    name: ${STACK_NAME:-interact}-irods-pgdata
+  irods_vault:
+    name: ${STACK_NAME:-interact}-irods-vault

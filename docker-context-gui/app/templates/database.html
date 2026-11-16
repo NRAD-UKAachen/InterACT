@@ -1,0 +1,22 @@
+{# database.html #}
+{% extends 'base.html' %}
+
+{% block head %}
+  <!-- Tweak these styles so that the iframe can be full‐screen (minus the 50px topbar) -->
+{% endblock %}
+
+{% block content %}
+  <!-- Full-screen iframe that loads DCM4CHEE UI via internal proxy (protected by GUI Keycloak) -->
+  <iframe src="/dcm4chee-arc/ui2/study/patient"
+          class="full-canvas"
+          title="DCM4CHEE Database Interface"
+          loading="lazy">
+    <div style="padding: 20px; text-align: center;">
+      <h2>Cannot Load DCM4CHEE Database</h2>
+      <p>Your browser doesn't support iframes or the DCM4CHEE service is not available.</p>
+      <a href="/dcm4chee-arc/ui2/study/patient" target="_blank" style="color: #3498db;">
+        Open DCM4CHEE in new tab
+      </a>
+    </div>
+  </iframe>
+{% endblock %}

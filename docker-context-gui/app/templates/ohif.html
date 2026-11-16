@@ -1,0 +1,47 @@
+{# app/templates/ohif.html #}
+{% extends 'base.html' %}
+
+{% block head %}
+  <!-- Static fallback shown only until base.html's nav shell takes over
+       (e.g. no-JS clients). The live viewer itself is created and kept
+       alive by the script in base.html (#ohif-slot), so it survives
+       switching to another sidebar item and back. -->
+  <style>
+    /* The real viewer lives in a nav-slot iframe; this is only the fallback
+       shown when it cannot be reached. */
+    .fallback-content {
+      padding: 60px 40px;
+      text-align: center;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      margin: 40px 10px 10px;
+      min-height: calc(100vh - 200px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+    .fallback-content h2 { font-size: 32px; margin-bottom: 20px; color: var(--success); }
+    .fallback-content p { font-size: 18px; line-height: 1.6; margin-bottom: 15px; }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="fallback-content">
+    <h2>🏥 OHIF DICOM Viewer</h2>
+    <p style="font-size: 20px; margin-bottom: 25px;">Loading OHIF Viewer connected to DCM4CHEE database...</p>
+    <p style="color: #A3C644; font-weight: bold; font-size: 22px; margin-bottom: 30px;">📊 Data Source: DCM4CHEE PACS at {{ OHIF_BASE_URL }}</p>
+    <div style="margin-top: 30px; font-size: 18px;">
+      <a href="{{ OHIF_BASE_URL }}/?sortBy=studyDate&sortDirection=ascending"
+         style="color: #3498db; text-decoration: none; font-weight: bold; display: inline-block; padding: 15px 25px; background: rgba(52, 152, 219, 0.1); border-radius: 8px; margin: 10px;">
+        🔗 Open OHIF Viewer (Sorted by Study Date)
+      </a>
+      <br>
+      <a href="{{ DCM4CHEE_ADMIN_BASE_URL }}/dcm4chee-arc/ui2/study/study"
+         style="color: #e67e22; text-decoration: none; font-weight: bold; display: inline-block; padding: 15px 25px; background: rgba(230, 126, 34, 0.1); border-radius: 8px; margin: 10px;">
+        🏥 Open DCM4CHEE Direct Access
+      </a>
+    </div>
+  </div>
+{% endblock %}

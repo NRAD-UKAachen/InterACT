@@ -1,0 +1,4 @@
+[submodule "viewers"]
+	path = viewers
+	url = https://github.com/NRAD-UKAachen/Viewers.git
+	branch = interact

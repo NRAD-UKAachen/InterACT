@@ -1,0 +1,32 @@
+ldct/steps/__pycache__
+/mnt/network/sanData/data/projects/Amaal/Backup
+/mnt/network/sanData/data/projects/Amaal/cpu_out
+*.pyc
+*.pyo
+*.pyd
+*.npy
+*.nrrd
+*.nii
+*.dcm
+*.log
+*.tmp
+# Ignore specific directories
+Backup/
+LDCT_Sim/
+Data/
+cpu_out/
+Simulated/
+# Ignore installer scripts
+Miniconda3-latest-Linux-x86_64.sh
+Miniconda3-latest-Linux-x86_64.sh.1
+
+# Ignore specific script you don't want in Git
+Allstepy.py
+Medical Physics - 2024 - Alsaihati - Development validation and application of a generic image‐based noise addition.pdf
+val.py
+plot6.py
+step4.py
+runacode.py
+pyproject.toml
+Allsteps.PNG
+config.default.yaml

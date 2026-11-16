@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  /* Only the warning-amber heading is specific to this page; the container,
+     card and hint styles all come from static/style.css now. */
+  .page-container { margin-top: 60px; }
+  .card h3 { color: #f3b13c; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="card">
+        {% if no_account %}
+        <h3><i class="fa-solid fa-triangle-exclamation"></i> No iRODS account yet</h3>
+        <p class="hint">
+            You're signed in as <code>{{ username }}</code>, but there is no iRODS
+            account with that name yet, so there are no files to show you.
+        </p>
+        <p class="hint">
+            Ask an admin to create one for you on the <em>iRODS &rarr; Manage Users</em>
+            page. It has to be created with exactly the username above - that's what
+            links your single sign-on account to your iRODS storage.
+        </p>
+        {% else %}
+        <h3><i class="fa-solid fa-triangle-exclamation"></i> iRODS is not available</h3>
+        <p class="hint">
+            Your files couldn't be loaded. You're signed in as <code>{{ username }}</code>.
+            If this doesn't clear up, an admin can check whether your iRODS account and
+            home folder exist, and whether the iRODS server is reachable.
+        </p>
+        {% endif %}
+        {% if detail %}
+        <p class="hint" style="color:#888; margin-top: 18px;">
+            Details: {{ detail }}
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

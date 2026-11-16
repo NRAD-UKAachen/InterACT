@@ -1,0 +1,191 @@
+# InterACT portal: the Flask app users actually log into.
+#
+# Part of the InterACT Compose project -- start it from the repo root
+# (`docker compose up -d`), not from this directory. All values come from the
+# root .env; see .env.example.
+
+services:
+  interact-gui:
+    # No `user:` override: the entrypoint starts as root so it can fix
+    # ownership of bind mounts Docker auto-creates as root (e.g. on a fresh
+    # clone), then drops to HOST_UID:HOST_GID itself via gosu before exec'ing
+    # the app. See docker-entrypoint.sh.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ${STACK_NAME:-interact}-gui-interact-gui-container
+    ports:
+      - "${PORT_PORTAL:-5005}:5000"
+    volumes:
+      - ./app:/app/app
+      - ./run.py:/app/run.py
+      - ./requirements.txt:/app/requirements.txt
+      # Bug reports posted on the portal's landing page (app/routes/home.py).
+      - ./uids_logs:/app/uids_logs
+      # Server-side Flask sessions (see create_app). These files hold live
+      # Keycloak access/refresh tokens, so they are mode 0600 and must not
+      # be world-readable on the host. Persisted rather than container-local
+      # so a restart/redeploy doesn't log everyone out mid-shift.
+      - ./flask_sessions:/app/flask_sessions
+      # PHI access audit trail (app/utils/audit.py). A named host path, not a
+      # container-local one: the whole point is that it outlives the container
+      # and can be backed up. Do not mount this read-only.
+      - ./audit_logs:/app/audit_logs
+      # The nginx PHI trail, so /audit/ can show OHIF's dcm4chee traffic
+      # alongside this app's own records - that traffic never reaches Flask,
+      # so without this the page would omit the commonest action there is
+      # (opening a study in the viewer). Read-only and mounted as a
+      # DIRECTORY, not a file: nginx recreates the file on rotation/reopen,
+      # and a single-file bind mount would pin the old inode.
+      - ../viewers/platform/app/.recipes/Nginx-Dcm4chee/logs/nginx:/app/nginx_audit:ro
+      # Airflow shared workflow data
+      - ${AIRFLOW_WORKFLOWS_DIR}:/data/airflow/workflows:rw
+      - ${FL_LOCAL_TRAINING_DATA_DIR}:/app/fl_local_training_data:rw
+      # Shared API storage (registry files for toolbar buttons)
+      - ${API_STORAGE_DIR}:${API_STORAGE_DIR}
+
+    environment:
+      # Read by docker-entrypoint.sh to chown bind mounts and drop privileges
+      # to before exec'ing the app (see the `user:` note above).
+      - HOST_UID=${HOST_UID:-1000}
+      - HOST_GID=${HOST_GID:-1000}
+      - TZ=Europe/Berlin
+      - PYTHONUNBUFFERED=1
+      - FLASK_APP=run.py
+      - FLASK_DEBUG=0
+      - DISABLE_OIDC=0
+      # The OIDC client config is rendered from client_secrets.json.template by
+      # the container's entrypoint, using the OIDC_* values below. There is no
+      # tracked file holding the secret.
+      - OIDC_CLIENT_SECRETS=/tmp/client_secrets.json
+      - OIDC_CLIENT_ID=flask-gui
+      - OIDC_CLIENT_SECRET=${OIDC_GUI_CLIENT_SECRET:?Set OIDC_GUI_CLIENT_SECRET in the root .env}
+      # Keycloak's issuer, exactly as it stamps it into tokens. This is a
+      # browser-reachable URL, not a container name: the browser is redirected
+      # here to log in, so it must resolve from the user's machine.
+      - OIDC_ISSUER=${KEYCLOAK_BASE_URL}
+      # Signs the session cookie. MUST be a fresh random value and MUST NOT
+      # equal the Keycloak client secret (they used to be the same string,
+      # hardcoded in app/__init__.py and committed). Generate with:
+      #   python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
+      - FLASK_SECRET_KEY=${GUI_FLASK_SECRET_KEY:?Set GUI_FLASK_SECRET_KEY in the root .env}
+      # This deployment's own public identity. Everything browser-facing --
+      # OIDC redirect URIs, CORS origins, the links in the templates -- is
+      # built from these, so PUBLIC_HOST in the root .env is the only thing
+      # that has to change to move the deployment to another machine.
+      - PUBLIC_HOST=${PUBLIC_HOST}
+      - PORTAL_BASE_URL=${PORTAL_BASE_URL}
+      - OHIF_BASE_URL=${OHIF_BASE_URL}
+      - DCM4CHEE_ADMIN_BASE_URL=${DCM4CHEE_ADMIN_BASE_URL}
+      - OIDC_CANONICAL_REDIRECT_URI=${PORTAL_BASE_URL}/oidc_callback
+      # Hosts an OIDC redirect_uri may be built for. A Host header outside
+      # this list falls back to OIDC_CANONICAL_REDIRECT_URI, so a forged Host
+      # cannot redirect the authorization code elsewhere. Add any extra name
+      # or IP colleagues reach this portal by.
+      - OIDC_ALLOWED_HOSTS=${OIDC_ALLOWED_HOSTS:-${PUBLIC_HOST}:${PORT_PORTAL},localhost:${PORT_PORTAL},127.0.0.1:${PORT_PORTAL}}
+      - CORS_ALLOWED_ORIGINS=${OHIF_BASE_URL}
+      # Set to 1 ONLY for plain-HTTP local dev; leaving it unset keeps the
+      # session and id_token cookies marked Secure.
+      - COOKIES_INSECURE=${COOKIES_INSECURE:-0}
+      # 1 when behind a TLS terminator, so X-Forwarded-Proto is trusted.
+      - BEHIND_TLS_PROXY=${BEHIND_TLS_PROXY:-0}
+      # Where server-side sessions are stored, and how long a login survives
+      # without activity (rolling, refreshed on each request).
+      - SESSION_FILE_DIR=/app/flask_sessions
+      # Browser cookies are scoped by host, not port, so two stacks on one
+      # hostname would otherwise share -- and clobber -- one session cookie.
+      - SESSION_COOKIE_NAME=interact_gui_session_${STACK_NAME:-interact}
+      - SESSION_LIFETIME_HOURS=${SESSION_LIFETIME_HOURS:-12}
+      # The batch API is bound to loopback on the host, so reach it over the
+      # shared dcm4chee network by container name. Browsers go via /api-proxy.
+      - BATCH_API_BASE=http://ohif_api:9200
+      - BATCH_API_INTERNAL=http://ohif_api:9200
+      - NO_PROXY=${INTERACT_NO_PROXY:-}
+      - no_proxy=${INTERACT_NO_PROXY:-}
+      - HTTP_PROXY=${INTERACT_HTTP_PROXY:-}
+      - HTTPS_PROXY=${INTERACT_HTTPS_PROXY:-}
+      - http_proxy=${INTERACT_HTTP_PROXY:-}
+      - https_proxy=${INTERACT_HTTPS_PROXY:-}
+      - ALL_PROXY=
+      # Same host path inside the container as on the host: this app and the
+      # API container exchange work through files here, so an absolute path
+      # written by one has to mean the same thing to the other.
+      - API_STORAGE_DIR=${API_STORAGE_DIR}
+      # Upstream for /proxy/colleague/, i.e. the "Interactive Segmentation"
+      # page. Reached by Compose SERVICE name (stable across STACK_NAME,
+      # unlike the container name) over the shared dcm4chee network -- see
+      # docker-context-saminrad/docker-compose.yml -- so it does not depend
+      # on the host's published port. Keep the name in NO_PROXY, or the
+      # proxy requests leave via the corporate HTTP proxy.
+      - COLLEAGUE_BASE=http://saminrad:8003
+      # Internal URL for dcm4chee proxy (via Docker network). Routed through
+      # dcm4chee-ui-proxy (viewers/.../Nginx-Dcm4chee/docker-compose.yml)
+      # rather than straight to arc so the Aachen color-scheme stylesheet it
+      # injects into dcm4chee-arc-ui2's HTML shows up in the "Database" page's
+      # iframe too, not just the standalone admin UI.
+      - DCM4CHEE_INTERNAL_URL=http://dcm4chee-ui-proxy:80
+      # Airflow integration (profile: airflow). The portal degrades gracefully
+      # when Airflow is not running.
+      - AIRFLOW_API_URL=http://airflow-webserver:8080/api/v1
+      - AIRFLOW_API_USER=${AIRFLOW_API_USER:-admin}
+      - AIRFLOW_API_PASSWORD=${AIRFLOW_API_PASSWORD:-}
+      - AIRFLOW_WORKFLOWS_DIR=/data/airflow/workflows
+      # Federated learning: this instance's own externally-reachable address,
+      # embedded in the "Copy Local Instance Definition" JSON a partner site
+      # pastes into their registration form -- their Airflow calls back to
+      # this.
+      - FEDERATED_LOCAL_BASE_URL=${PORTAL_BASE_URL}
+      # PHI access audit trail. AUDIT_RETENTION_DAYS=0 keeps every file
+      # forever; set it once a retention period has actually been agreed
+      # (see the PHI audit section of Documentation/GUI.md) rather than guessing here.
+      - AUDIT_LOG_DIR=/app/audit_logs
+      - AUDIT_RETENTION_DAYS=${AUDIT_RETENTION_DAYS:-0}
+      - NGINX_AUDIT_LOG=/app/nginx_audit/phi-audit.log
+      # How long an admin's stated reason for reading the trail stays valid
+      # before they are asked again (app/routes/audit_log.py).
+      - AUDIT_REASON_TTL_MINUTES=${AUDIT_REASON_TTL_MINUTES:-30}
+      # iRODS (profile: irods; see ../IRODS/ and
+      # Documentation/iRODS.md).
+      # The GUI holds NO iRODS credential: it forwards each logged-in person's
+      # own Keycloak access token to the HTTP API, which maps it to their iRODS
+      # account. Nothing here needs to be kept in sync with the iRODS secrets.
+      - IRODS_HTTP_API_URL=http://irods-http-api:9000/irods-http-api/0.6.0
+      - IRODS_ZONE=${IRODS_ZONE_NAME:-interactZone}
+      # Upload / batch stage-in tuning (app/utils/irods_client.py,
+      # app/routes/batch.py). The defaults repeat the code's own; see
+      # Documentation/iRODS.md for what each one does.
+      - IRODS_WRITE_CONCURRENCY=${IRODS_WRITE_CONCURRENCY:-8}
+      - IRODS_STAGE_CONCURRENCY=${IRODS_STAGE_CONCURRENCY:-6}
+      - IRODS_STAGE_STALL_SECONDS=${IRODS_STAGE_STALL_SECONDS:-45}
+      - IRODS_STAGE_BUNDLE=${IRODS_STAGE_BUNDLE:-1}
+      - IRODS_STAGE_BUNDLE_MIN_FILES=${IRODS_STAGE_BUNDLE_MIN_FILES:-8}
+      - IRODS_STAGE_BUNDLE_CONCURRENCY=${IRODS_STAGE_BUNDLE_CONCURRENCY:-4}
+      - IRODS_RULE_ENGINE_INSTANCE=${IRODS_RULE_ENGINE_INSTANCE:-irods_rule_engine_plugin-irods_rule_language-instance}
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    healthcheck:
+      test: ["CMD", "sh", "-c", "python - <<'PY'\nimport urllib.request,sys\n\
+                try:\n  urllib.request.urlopen('http://127.0.0.1:5000/', timeout=3)\n  sys.exit(0)\n\
+          except Exception:\n  sys.exit(1)\nPY"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+    restart: unless-stopped
+    networks:
+      - interact-dcm4chee
+      - interact-irods
+
+# Declared identically in every stack file and in the root docker-compose.yml.
+# `include:` merges these top-level blocks, so they must agree exactly; the
+# shared names replace the old project-prefixed `nginx-dcm4chee_default`.
+networks:
+  interact-dcm4chee:
+    name: ${STACK_NAME:-interact}-dcm4chee
+    driver: bridge
+  interact-irods:
+    name: ${STACK_NAME:-interact}-irods
+    driver: bridge

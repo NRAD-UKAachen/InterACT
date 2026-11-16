@@ -1,0 +1,12 @@
+<!-- templates/interactive_iframe.html -->
+{% extends "base.html" %}
+{% block content %}
+<div style="height: calc(100vh - 110px);">
+  <iframe
+    src="/proxy/colleague/?cb={{ cb }}"   
+    style="width:100%; height:100%; border:0; background:var(--page-bg);"
+    title="Interactive Segmentation">
+  </iframe>
+</div>
+{% endblock %}
+

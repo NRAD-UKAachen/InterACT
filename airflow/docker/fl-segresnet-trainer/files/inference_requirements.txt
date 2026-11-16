@@ -1,0 +1,20 @@
+# Matches the exact environment this recipe/model were trained under, so
+# recipe.tar.gz's own scripts import correctly. That matters even for
+# inference-only use: Python runs a module's top-level imports regardless
+# of which function you actually call, and Auto3DSeg's segmenter.py
+# imports fire/psutil/tensorboard at the top of the file purely for its
+# training code path -- so this script would fail on those imports
+# before ever reaching the inference code, without them installed too.
+#
+# torch needs PyTorch's own CUDA build, hence the extra index below --
+# this line only changes where THAT package is fetched from, everything
+# else still comes from the normal PyPI index.
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.5.1
+monai==1.5.0
+nibabel==5.3.2
+numpy==2.2.6
+fire==0.6.0
+pyyaml==6.0.2
+psutil==7.0.0
+tensorboard==2.19.0

@@ -1,0 +1,90 @@
+# SAMinRAD: SAM2 interactive segmentation (Compose profile: saminrad).
+#
+# Part of the InterACT Compose project -- start it from the repo root
+# (`docker compose --profile saminrad up -d`), not from this directory. All
+# values come from the root .env; see .env.example.
+
+services:
+  saminrad:
+    profiles: ["saminrad", "all"]
+    # No `user:` override: the entrypoint starts as root so it can fix
+    # ownership of bind mounts Docker auto-creates as root (e.g. on a fresh
+    # clone), then drops to HOST_UID:HOST_GID itself via gosu before exec'ing
+    # the checkpoint download and the app. See docker-entrypoint.sh.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${STACK_NAME:-interact}-saminrad:latest
+    container_name: ${STACK_NAME:-interact}-saminrad
+    ports:
+      # Only for direct access/debugging. The GUI reaches the container via
+      # the name on the dcm4chee network, not via this port. 8003 is still
+      # occupied by the colleague's old SAMinRAD container.
+      # Loopback only: this port has no login of its own and bypasses the
+      # portal's Keycloak check and audit trail. Reach it from another
+      # machine through an SSH tunnel (`ssh -L 8010:localhost:8010 <host>`).
+      - "127.0.0.1:${PORT_SAMINRAD:-8010}:8003"
+    volumes:
+      # Runtime data (archive/, input/, temp_upload/). API_storage/ is
+      # gitignored repo-wide; Config.create_directories() creates the
+      # subfolders itself on startup.
+      - ${API_STORAGE_DIR}/SAM_data:/app/data
+      # SAM2 weights. Populated by docker-entrypoint.sh on the first start
+      # and reused across rebuilds afterward. Gitignored.
+      - ./checkpoints:/app/checkpoints
+    environment:
+      # Read by docker-entrypoint.sh to chown bind mounts and drop privileges
+      # to before running the checkpoint download and the app.
+      - HOST_UID=${HOST_UID:-1000}
+      - HOST_GID=${HOST_GID:-1000}
+      - TZ=Europe/Berlin
+      - PYTHONUNBUFFERED=1
+      # The checkpoint download on the first start goes through the proxy to
+      # the outside, if one is configured (see root .env).
+      - HTTP_PROXY=${INTERACT_HTTP_PROXY:-}
+      - HTTPS_PROXY=${INTERACT_HTTPS_PROXY:-}
+      - http_proxy=${INTERACT_HTTP_PROXY:-}
+      - https_proxy=${INTERACT_HTTPS_PROXY:-}
+      - NO_PROXY=${INTERACT_NO_PROXY:-}
+      - no_proxy=${INTERACT_NO_PROXY:-}
+      - ALL_PROXY=
+      - FLASK_SECRET_KEY=${SAMINRAD_FLASK_SECRET_KEY:?Set SAMINRAD_FLASK_SECRET_KEY in the root .env}
+      - SAM2_DEVICE=${SAM2_DEVICE:-cuda}
+      - DOWNSAMPLE_VIEWER=${DOWNSAMPLE_VIEWER:-0.7}
+      # A different SAM2 checkpoint: docker-entrypoint.sh downloads
+      # SAM2_CHECKPOINT_URL to SAM2_CHECKPOINT on the first start and checks
+      # it against SAM2_CHECKPOINT_SHA256; the app loads it with
+      # SAM2_MODEL_CONFIG, which must match the checkpoint's model size.
+      - SAM2_CHECKPOINT=${SAM2_CHECKPOINT:-/app/checkpoints/sam2.1_hiera_large.pt}
+      - SAM2_CHECKPOINT_URL=${SAM2_CHECKPOINT_URL:-https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt}
+      - SAM2_CHECKPOINT_SHA256=${SAM2_CHECKPOINT_SHA256:-2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318}
+      - SAM2_MODEL_CONFIG=${SAM2_MODEL_CONFIG:-configs/sam2.1/sam2.1_hiera_l.yaml}
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1            # reserve one GPU (alternatively: device_ids: ['0'])
+              capabilities: [gpu]
+    healthcheck:
+      # Only turns healthy after the checkpoint download and model loading -
+      # hence the generous start_period.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8003/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+    networks:
+      # Shared network with interact-gui, so that its /proxy/colleague/
+      # reaches the service at http://saminrad:8003 (Compose service name,
+      # independent of STACK_NAME -- not the container name).
+      - interact-dcm4chee
+
+# Declared identically in every stack file and in the root docker-compose.yml.
+# `include:` merges these top-level blocks, so they must agree exactly; the
+# shared names replace the old project-prefixed `nginx-dcm4chee_default`.
+networks:
+  interact-dcm4chee:
+    name: ${STACK_NAME:-interact}-dcm4chee
+    driver: bridge

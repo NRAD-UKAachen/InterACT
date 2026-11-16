@@ -1,0 +1,652 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  /* Breadcrumbs, entry links and the page-wide drop target are specific to
+     the browser; tabs, cards, tables, badges, buttons, inputs and the share
+     modal all come from static/style.css now. */
+  .irods-topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; flex-wrap: wrap; margin-bottom: 10px;
+  }
+
+  .breadcrumb-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 1.05rem; }
+  .breadcrumb-bar a { color: var(--text); text-decoration: none; padding: 4px 6px; border-radius: 6px; }
+  .breadcrumb-bar a:hover { background: rgba(255,255,255,0.08); }
+  .breadcrumb-bar a.crumb-home { color: #cfcfcf; }
+  .breadcrumb-bar .crumb-sep { color: #666; font-size: 0.75rem; }
+  .breadcrumb-bar .crumb-current { color: var(--text); font-weight: 600; padding: 4px 6px; }
+
+  .share-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 18px; }
+
+  /* The drop target is the whole page (see the drag-and-drop upload JS
+     below), so the visual cue is a fixed full-viewport overlay rather
+     than a border on any one element - the file-list card is nowhere
+     near big enough to reliably catch a drop that starts elsewhere on
+     the page. Shown while dragging over the page, and again from the
+     moment a drop lands until the upload form navigates away - a
+     dropped folder's files only surface through the async FileSystem
+     entry API (see walkEntry below), which can take several seconds on
+     a large folder with zero feedback of its own, long enough to look
+     like the drop just didn't register. */
+  .page-drop-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(102,153,0,0.15);
+    border: 4px dashed var(--green);
+    color: var(--text); font-size: 1.2rem; font-weight: 600;
+    pointer-events: none;
+  }
+  .page-drop-overlay .overlay-inner { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  /* Real upload progress - hidden until performUpload() starts
+     actually sending bytes, shown instead of the plain "Uploading…" text
+     once there is a percentage worth reporting. */
+  .page-drop-overlay .upload-progress-track {
+    width: 320px; max-width: 70vw; height: 10px; border-radius: 6px;
+    background: rgba(255,255,255,0.18); overflow: hidden;
+  }
+  .page-drop-overlay .upload-progress-fill {
+    height: 100%; width: 0%; background: #FFF; transition: width .15s ease;
+  }
+  .page-drop-overlay .overlay-subtext { font-size: 0.85rem; font-weight: 400; opacity: 0.85; }
+  .page-drop-overlay.active { display: flex; }
+
+  .data-table td { vertical-align: middle; padding: 14px 20px; }
+  .data-table th { padding: 14px 20px; }
+  .data-table .col-size, .data-table .col-modified { color: var(--text-muted); font-size: 0.9rem; white-space: nowrap; }
+
+  .entry-link { display: flex; align-items: center; gap: 12px; color: var(--text); text-decoration: none; }
+  .entry-link i { color: var(--text-muted); width: 18px; text-align: center; }
+  .entry-link.is-folder { font-weight: 600; }
+  .entry-link.is-folder i { color: var(--green); }
+  .entry-link:hover .entry-name { text-decoration: underline; }
+  .entry-parent, .entry-parent i { color: var(--text-muted); }
+
+  .modal-card .modal-target { color: var(--success); }
+</style>
+{% endblock %}
+
+{% block content %}
+{% if can_write %}
+<div class="page-drop-overlay" id="page-drop-overlay">
+    <div class="overlay-inner">
+        <span id="page-drop-overlay-text">Drop to upload</span>
+        <div class="upload-progress-track" id="upload-progress-track" hidden>
+            <div class="upload-progress-fill" id="upload-progress-fill"></div>
+        </div>
+        <span class="overlay-subtext" id="upload-progress-subtext"></span>
+    </div>
+</div>
+{% endif %}
+<div class="page-container">
+
+    <div class="tab-container">
+        <a href="{{ url_for('irods_browser.index', embedded=('1' if embedded else none), picker=picker) }}"
+           class="{{ 'active' if request.endpoint in ['irods_browser.index', 'irods_browser.browse'] else '' }}">
+            <i class="fa-solid fa-folder-open"></i> Files
+        </a>
+        <a href="{{ url_for('irods_browser.shared', embedded=('1' if embedded else none), picker=picker) }}"
+           class="{{ 'active' if request.endpoint == 'irods_browser.shared' else '' }}">
+            <i class="fa-solid fa-share-nodes"></i> Shared with me
+        </a>
+    </div>
+
+    <div class="irods-topbar">
+        <div class="breadcrumb-bar">
+            <a class="crumb-home" href="{{ url_for('irods_browser.index', embedded=('1' if embedded else none), picker=picker) }}">
+                <i class="fa-solid fa-house"></i>
+            </a>
+            {% for crumb in breadcrumbs %}
+                <span class="crumb-sep"><i class="fa-solid fa-chevron-right"></i></span>
+                {% if loop.last %}
+                    <span class="crumb-current">{{ crumb.name }}</span>
+                {% else %}
+                    <a class="crumb" href="{{ url_for('irods_browser.browse', rel_path=crumb.rel_path, embedded=('1' if embedded else none), picker=picker) }}">{{ crumb.name }}</a>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="actions">
+            {% if picker %}
+            <button type="button" class="btn btn-primary" id="picker-select-btn"
+                    data-path="{{ current_path }}">
+                <i class="fa-solid fa-check"></i> Select this folder
+            </button>
+            {% else %}
+            <a class="btn btn-secondary" href="{{ url_for('irods_browser.download_folder', rel_path=rel_path, embedded=('1' if embedded else none), picker=picker) }}">
+                <i class="fa-solid fa-file-zipper"></i> Download folder
+            </a>
+            {% endif %}
+            {% if can_write %}
+            <button type="button" class="btn btn-secondary" id="new-folder-btn">
+                <i class="fa-solid fa-folder-plus"></i> New Folder
+            </button>
+            {% if can_share %}
+            <button type="button" class="btn btn-secondary share-trigger"
+                    data-target-path="{{ current_path }}" data-target-type="collection"
+                    data-target-name="{{ breadcrumbs[-1].name if breadcrumbs else 'this folder' }}">
+                <i class="fa-solid fa-share-nodes"></i> Share
+            </button>
+            {% endif %}
+            <button type="button" class="btn btn-primary" id="upload-btn">
+                <i class="fa-solid fa-upload"></i> Upload
+            </button>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not can_write %}
+    <p class="hint"><i class="fa-solid fa-eye"></i> You have read-only access to this folder.</p>
+    {% endif %}
+
+    {% if can_share %}
+    <div class="share-status">
+        {% for perm in permissions %}
+            <span class="badge {{ 'badge-own' if perm.perm == 'own' else ('badge-write' if perm.perm in ['write', 'modify_object'] else '') }}">{{ perm.name }}: {{ perm.perm }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if can_write %}
+    <div class="card card--compact card--inline" id="new-folder-panel" hidden>
+        <form method="POST" action="{{ url_for('irods_browser.mkdir') }}" style="display:flex; gap:10px; align-items:center;">
+            <input type="hidden" name="rel_path" value="{{ rel_path }}">
+            <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+                <input type="hidden" name="picker" value="{{ picker or '' }}">
+            <input type="text" name="name" placeholder="Folder name" required>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-check"></i> Create</button>
+            <button type="button" class="btn btn-ghost" data-close="new-folder-panel">Cancel</button>
+        </form>
+    </div>
+
+    <form method="POST" action="{{ url_for('irods_browser.upload') }}" enctype="multipart/form-data" id="upload-form" hidden>
+        <input type="hidden" name="rel_path" value="{{ rel_path }}">
+        <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+                <input type="hidden" name="picker" value="{{ picker or '' }}">
+        <input type="file" name="file" multiple required>
+    </form>
+    {% endif %}
+
+    <div class="card card--flush">
+        {% if not subcollections and not data_objects %}
+            <p class="empty-state">This folder is empty.{% if can_write %} Drag and drop files here to upload.{% endif %}</p>
+        {% else %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th class="col-size">Size</th>
+                    <th class="col-modified">Modified</th>
+                    <th class="col-actions"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if parent_rel_path is not none %}
+                <tr>
+                    <td colspan="4">
+                        <a class="entry-link entry-parent" href="{{ url_for('irods_browser.browse', rel_path=parent_rel_path, embedded=('1' if embedded else none), picker=picker) }}">
+                            <i class="fa-solid fa-turn-up"></i> ..
+                        </a>
+                    </td>
+                </tr>
+                {% endif %}
+                {% for coll in subcollections %}
+                <tr>
+                    <td>
+                        <a class="entry-link is-folder" href="{{ url_for('irods_browser.browse', rel_path=coll.path.strip('/'), embedded=('1' if embedded else none), picker=picker) }}">
+                            <i class="fa-solid fa-folder"></i> <span class="entry-name">{{ coll.name }}</span>
+                        </a>
+                    </td>
+                    <td class="col-size">—</td>
+                    <td class="col-modified">{{ coll.modified|timeago }}</td>
+                    <td class="col-actions">
+                        {% if can_share %}
+                        <button type="button" class="icon-btn share-btn share-trigger" title="Share folder"
+                                data-target-path="{{ coll.path }}" data-target-type="collection" data-target-name="{{ coll.name }}">
+                            <i class="fa-solid fa-share-nodes"></i>
+                        </button>
+                        {% endif %}
+                        <a class="icon-btn" title="Download folder as ZIP" href="{{ url_for('irods_browser.download_folder', rel_path=coll.path.strip('/'), embedded=('1' if embedded else none), picker=picker) }}">
+                            <i class="fa-solid fa-file-zipper"></i>
+                        </a>
+                        <form method="POST" action="{{ url_for('irods_browser.delete') }}"
+                              onsubmit="return confirm('Delete folder {{ coll.name }} and everything inside it?');" style="display:inline;">
+                            <input type="hidden" name="rel_path" value="{{ rel_path }}">
+                            <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+                <input type="hidden" name="picker" value="{{ picker or '' }}">
+                            <input type="hidden" name="target" value="{{ coll.path }}">
+                            <input type="hidden" name="type" value="collection">
+                            <button type="submit" class="icon-btn danger" title="Delete folder"><i class="fa-solid fa-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% for obj in data_objects %}
+                <tr>
+                    <td>
+                        <span class="entry-link"><i class="fa-solid fa-file"></i> <span class="entry-name">{{ obj.name }}</span></span>
+                    </td>
+                    <td class="col-size">{{ obj.size|filesize }}</td>
+                    <td class="col-modified">{{ obj.modified|timeago }}</td>
+                    <td class="col-actions">
+                        {% if can_share %}
+                        <button type="button" class="icon-btn share-btn share-trigger" title="Share file"
+                                data-target-path="{{ obj.path }}" data-target-type="data_object" data-target-name="{{ obj.name }}">
+                            <i class="fa-solid fa-share-nodes"></i>
+                        </button>
+                        {% endif %}
+                        <a class="icon-btn" title="Download" href="{{ url_for('irods_browser.download', rel_path=obj.path.strip('/')) }}">
+                            <i class="fa-solid fa-download"></i>
+                        </a>
+                        <form method="POST" action="{{ url_for('irods_browser.delete') }}"
+                              onsubmit="return confirm('Delete {{ obj.name }}?');" style="display:inline;">
+                            <input type="hidden" name="rel_path" value="{{ rel_path }}">
+                            <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+                <input type="hidden" name="picker" value="{{ picker or '' }}">
+                            <input type="hidden" name="target" value="{{ obj.path }}">
+                            <input type="hidden" name="type" value="data_object">
+                            <button type="submit" class="icon-btn danger" title="Delete file"><i class="fa-solid fa-trash"></i></button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+    </div>
+
+    {% if can_share %}
+    <div class="modal-overlay" id="share-modal" hidden>
+        <div class="modal-card">
+            <h3><i class="fa-solid fa-share-nodes"></i> Share <span class="modal-target" id="share-modal-name"></span></h3>
+            <p class="hint" style="margin-top: 6px;">The people you share with will find it under <em>Shared with me</em>.</p>
+            <form class="modal-form" method="POST" action="{{ url_for('irods_browser.share') }}">
+                <input type="hidden" name="rel_path" value="{{ rel_path }}">
+                <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+                <input type="hidden" name="picker" value="{{ picker or '' }}">
+                <input type="hidden" name="target" id="share-modal-target">
+                <input type="hidden" name="type" id="share-modal-type">
+                <input type="text" name="entity" placeholder="Username or group" required autocomplete="off">
+                <select name="level">
+                    <option value="read">read</option>
+                    <option value="write">write</option>
+                    <option value="own">own</option>
+                    <option value="null">revoke</option>
+                </select>
+                <div class="actions actions--end">
+                    <button type="button" class="btn btn-ghost" data-close="share-modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary"><i class="fa-solid fa-check"></i> Apply</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        // Folder-picker mode: this page loaded as /irods/browse/?picker=1
+        // inside a modal iframe (see batch.html's "Browse iRODS..." button).
+        // Posting the chosen path back to whichever window embedded us is
+        // the entire contract - the opener owns the modal and the target
+        // input field, this page just needs to say what got picked.
+        var pickerBtn = document.getElementById('picker-select-btn');
+        if (pickerBtn) {
+            pickerBtn.addEventListener('click', function () {
+                var target = window.parent !== window ? window.parent : (window.opener || null);
+                if (target) {
+                    target.postMessage(
+                        { type: 'irods-folder-picked', path: pickerBtn.dataset.path },
+                        window.location.origin
+                    );
+                }
+            });
+        }
+
+        var newFolderBtn = document.getElementById('new-folder-btn');
+        var newFolderPanel = document.getElementById('new-folder-panel');
+        if (newFolderBtn && newFolderPanel) {
+            newFolderBtn.addEventListener('click', function () {
+                newFolderPanel.hidden = false;
+                var input = newFolderPanel.querySelector('input[name="name"]');
+                if (input) input.focus();
+            });
+        }
+        document.querySelectorAll('[data-close]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var panel = document.getElementById(btn.dataset.close);
+                if (panel) panel.hidden = true;
+            });
+        });
+
+        var uploadBtn = document.getElementById('upload-btn');
+        var uploadForm = document.getElementById('upload-form');
+        var uploadInput = uploadForm ? uploadForm.querySelector('input[type="file"]') : null;
+
+        function formatBytes(n) {
+            if (!n) return '0 MB';
+            var mb = n / (1024 * 1024);
+            return mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb.toFixed(1) + ' MB';
+        }
+
+        // Real upload progress. A plain uploadForm.submit() (the
+        // original approach) gives zero feedback once the browser starts
+        // sending bytes - only XMLHttpRequest exposes an upload progress
+        // event (fetch's request-body streaming isn't reliably supported
+        // across browsers for this yet), so this replaces the native form
+        // submit with XHR POSTs.
+        //
+        // One request per file, UPLOAD_CONCURRENCY of them in flight, rather
+        // than one request carrying the whole drop. Two reasons, both about
+        // the drop actually finishing sooner:
+        //
+        //  - A single multipart POST has to arrive in full before Flask can
+        //    hand the first byte to iRODS, so the two transfers ran back to
+        //    back and the progress bar sat at 100% for the whole second one.
+        //    Per-file requests overlap them: files still arriving are being
+        //    written while later ones upload.
+        //  - Creating a data object costs ~25-30 ms inside iRODS whatever
+        //    its size, and that cost is nearly all waiting, so a few
+        //    concurrent writes go several times faster than the same writes
+        //    in sequence (see irods_client.WRITE_CONCURRENCY). Concurrency
+        //    on this side is what supplies them.
+        //
+        // Keep UPLOAD_CONCURRENCY at or below the server's own
+        // IRODS_WRITE_CONCURRENCY, which is sized against the HTTP API's
+        // request-thread count in IRODS/http_api/config.json.template.
+        var UPLOAD_CONCURRENCY = 6;
+
+        var uploadProgressTrack = document.getElementById('upload-progress-track');
+        var uploadProgressFill = document.getElementById('upload-progress-fill');
+        var uploadProgressSubtext = document.getElementById('upload-progress-subtext');
+
+        var relPathValue = uploadForm ? uploadForm.querySelector('input[name="rel_path"]').value : '';
+        var prepareUrl = "{{ url_for('irods_browser.upload_prepare') }}";
+        var finishUrl = "{{ url_for('irods_browser.upload_finish') }}";
+
+        function postJson(url, body) {
+            return fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                credentials: 'same-origin',
+            }).then(function (resp) {
+                return resp.json().catch(function () { return {}; });
+            });
+        }
+
+        // Every ancestor folder of every relPath, so upload_prepare can
+        // create the tree in one round trip before any file needs it.
+        function ancestorDirs(entries) {
+            var dirs = {};
+            entries.forEach(function (entry) {
+                var parts = (entry.relPath || '').split('/').filter(Boolean);
+                for (var depth = 1; depth < parts.length; depth++) {
+                    dirs[parts.slice(0, depth).join('/')] = true;
+                }
+            });
+            return Object.keys(dirs);
+        }
+
+        // POST one file. Reports its bytes-so-far through onProgress so the
+        // page can show one bar for the whole drop.
+        function uploadOne(entry, onProgress) {
+            return new Promise(function (resolve) {
+                var name = entry.relPath || entry.file.name;
+                var body = new FormData();
+                body.append('ajax', '1');
+                body.append('rel_path', relPathValue);
+                body.append('file', entry.file, entry.file.name);
+                if (entry.relPath) body.append('relpath', entry.relPath);
+
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', uploadForm.action);
+                xhr.upload.addEventListener('progress', function (e) {
+                    if (e.lengthComputable) onProgress(e.loaded);
+                });
+                xhr.onload = function () {
+                    onProgress(entry.file.size);
+                    var result = {};
+                    try { result = JSON.parse(xhr.responseText); } catch (err) { /* non-JSON error page */ }
+                    if (xhr.status === 200 && result.ok) {
+                        resolve({ name: name, error: null });
+                        return;
+                    }
+                    // A 200 that isn't our JSON is the login page: require_login
+                    // redirected this POST to Keycloak and XHR followed it.
+                    var reason = (result.failed && result.failed[0]) || result.error ||
+                        (xhr.status === 200 ? 'not logged in any more - reload the page' : 'HTTP ' + xhr.status);
+                    resolve({ name: name, error: reason });
+                };
+                xhr.onerror = function () {
+                    onProgress(entry.file.size);
+                    resolve({ name: name, error: 'connection lost' });
+                };
+                xhr.send(body);
+            });
+        }
+
+        // Fixed-size worker pool: UPLOAD_CONCURRENCY chains, each pulling the
+        // next file off the shared queue as it finishes one, so a slow file
+        // doesn't idle the others the way batching them in fixed rounds would.
+        function performUpload(entries) {
+            var totalBytes = entries.reduce(function (sum, entry) { return sum + entry.file.size; }, 0);
+            var loadedPerFile = new Array(entries.length).fill(0);
+            var done = 0;
+            var results = [];
+
+            if (uploadProgressTrack) {
+                uploadProgressTrack.hidden = false;
+                uploadProgressFill.style.width = '0%';
+            }
+            if (uploadProgressSubtext) uploadProgressSubtext.textContent = '';
+
+            function render() {
+                var loaded = loadedPerFile.reduce(function (a, b) { return a + b; }, 0);
+                var pct = totalBytes ? Math.round((loaded / totalBytes) * 100) : 100;
+                if (uploadProgressFill) uploadProgressFill.style.width = pct + '%';
+                if (uploadProgressSubtext) {
+                    uploadProgressSubtext.textContent =
+                        formatBytes(loaded) + ' / ' + formatBytes(totalBytes) + ' (' + pct + '%)' +
+                        (entries.length > 1 ? ' - ' + done + ' / ' + entries.length + ' files' : '');
+                }
+            }
+            render();
+
+            var next = 0;
+            function worker() {
+                if (next >= entries.length) return Promise.resolve();
+                var index = next++;
+                return uploadOne(entries[index], function (loaded) {
+                    loadedPerFile[index] = loaded;
+                    render();
+                }).then(function (result) {
+                    done++;
+                    results.push(result);
+                    render();
+                    return worker();
+                });
+            }
+
+            var chain = ancestorDirs(entries).length
+                ? postJson(prepareUrl, { rel_path: relPathValue, dirs: ancestorDirs(entries) })
+                : Promise.resolve({ ok: true });
+
+            chain.then(function (prepared) {
+                if (!prepared.ok) throw new Error(prepared.error || 'Could not create the folders for this upload.');
+                var workers = [];
+                for (var i = 0; i < Math.min(UPLOAD_CONCURRENCY, entries.length); i++) workers.push(worker());
+                return Promise.all(workers);
+            }).then(function () {
+                // Hand the tally back so the server can flash it - the reload
+                // below wipes anything shown here, and no single per-file
+                // request knows how the drop as a whole went. Names only
+                // while the summary would actually list them, and a bounded
+                // number of failures: a 5000-file folder drop shouldn't post
+                // a 5000-entry JSON body to render "Uploaded 5000 files."
+                var ok = results.filter(function (r) { return !r.error; });
+                var bad = results.filter(function (r) { return r.error; });
+                return postJson(finishUrl, {
+                    succeeded_count: ok.length,
+                    succeeded: ok.length <= 3 ? ok.map(function (r) { return r.name; }) : [],
+                    failed_count: bad.length,
+                    failed: bad.slice(0, 50).map(function (r) { return r.name + ' (' + r.error + ')'; }),
+                });
+            }).then(function () {
+                window.location.reload();
+            }).catch(function (err) {
+                if (pageDropOverlay) pageDropOverlay.classList.remove('active');
+                if (uploadProgressTrack) uploadProgressTrack.hidden = true;
+                alert(err.message || 'Upload failed - check your connection and try again.');
+            });
+        }
+
+        // A plain <input type="file"> selection has no folder structure to
+        // preserve, so every entry uploads at the top of the current folder.
+        function entriesFromFileList(files) {
+            return Array.prototype.map.call(files, function (file) {
+                return { file: file, relPath: '' };
+            });
+        }
+
+        if (uploadBtn && uploadInput) {
+            uploadBtn.addEventListener('click', function () { uploadInput.click(); });
+            uploadInput.addEventListener('change', function () {
+                if (!uploadInput.files.length) return;
+                if (pageDropOverlay && pageDropOverlayText) {
+                    pageDropOverlayText.textContent = 'Uploading…';
+                    pageDropOverlay.classList.add('active');
+                }
+                performUpload(entriesFromFileList(uploadInput.files));
+            });
+        }
+
+        // --- Share modal: one instance, populated from whichever row/toolbar
+        // button triggered it (data-target-path / -type / -name attributes) ---
+        var shareModal = document.getElementById('share-modal');
+        if (shareModal) {
+            var shareNameEl = document.getElementById('share-modal-name');
+            var shareTargetInput = document.getElementById('share-modal-target');
+            var shareTypeInput = document.getElementById('share-modal-type');
+
+            document.querySelectorAll('.share-trigger').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    shareNameEl.textContent = btn.dataset.targetName || '';
+                    shareTargetInput.value = btn.dataset.targetPath || '';
+                    shareTypeInput.value = btn.dataset.targetType || 'collection';
+                    shareModal.hidden = false;
+                    var entityInput = shareModal.querySelector('input[name="entity"]');
+                    if (entityInput) { entityInput.value = ''; entityInput.focus(); }
+                });
+            });
+            shareModal.addEventListener('click', function (e) {
+                if (e.target === shareModal) shareModal.hidden = true;
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') shareModal.hidden = true;
+            });
+        }
+
+        // --- Drag-and-drop upload ---
+        // The whole page is the drop target, not just the file-list card -
+        // a folder dragged in from the OS is easy to release a few pixels
+        // outside a small card, and there's only ever one upload
+        // destination on this page (the current folder) regardless of
+        // where the drop lands, so there's no ambiguity in casting a wide net.
+        var dropZone = document.documentElement;
+        var pageDropOverlay = document.getElementById('page-drop-overlay');
+        var pageDropOverlayText = document.getElementById('page-drop-overlay-text');
+        if (pageDropOverlay && uploadForm && uploadInput) {
+            var dragCounter = 0;
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(function (evt) {
+                dropZone.addEventListener(evt, function (e) { e.preventDefault(); e.stopPropagation(); });
+            });
+            dropZone.addEventListener('dragenter', function () {
+                dragCounter++;
+                pageDropOverlayText.textContent = 'Drop to upload';
+                pageDropOverlay.classList.add('active');
+            });
+            dropZone.addEventListener('dragleave', function () {
+                dragCounter = Math.max(0, dragCounter - 1);
+                if (dragCounter === 0) pageDropOverlay.classList.remove('active');
+            });
+
+            // Walk one dropped entry down to its files. A dropped folder isn't a
+            // File - the browser only lets you read its content through this
+            // async entry API - so this resolves to a flat list of
+            // {file, relPath}, relPath being the path the file had inside the
+            // drop (e.g. "myfolder/sub/file.txt"), which is what lets the
+            // upload rebuild the same folder structure in iRODS.
+            function walkEntry(entry) {
+                return new Promise(function (resolve) {
+                    if (entry.isFile) {
+                        entry.file(function (file) {
+                            resolve([{ file: file, relPath: entry.fullPath.replace(/^\/+/, '') }]);
+                        }, function () { resolve([]); });
+                    } else if (entry.isDirectory) {
+                        var reader = entry.createReader();
+                        var children = [];
+                        (function readBatch() {
+                            reader.readEntries(function (batch) {
+                                if (!batch.length) {
+                                    Promise.all(children.map(walkEntry)).then(function (lists) {
+                                        resolve([].concat.apply([], lists));
+                                    });
+                                    return;
+                                }
+                                // A single readEntries() call isn't guaranteed to
+                                // return everything - keep calling until it does.
+                                children = children.concat(batch);
+                                readBatch();
+                            }, function () { resolve([]); });
+                        })();
+                    } else {
+                        resolve([]);
+                    }
+                });
+            }
+
+            function setScanning() {
+                pageDropOverlayText.textContent = 'Uploading…';
+                pageDropOverlay.classList.add('active');
+            }
+
+            dropZone.addEventListener('drop', function (e) {
+                dragCounter = 0;
+                pageDropOverlay.classList.remove('active');
+
+                var items = e.dataTransfer && e.dataTransfer.items;
+                var entries = items && Array.prototype.map.call(items, function (item) {
+                    return item.webkitGetAsEntry && item.webkitGetAsEntry();
+                }).filter(Boolean);
+
+                if (entries && entries.length) {
+                    // Folder drop (or a browser new enough to support this API
+                    // for a plain file drop too): resolve every entry, then
+                    // hand the flat {file, relPath} list to the uploader,
+                    // which recreates that structure in iRODS. Walking the
+                    // entry tree is itself async and can take a while on a
+                    // large folder, so show the "Uploading…" overlay
+                    // immediately on drop rather than only once the first
+                    // request starts.
+                    setScanning();
+                    Promise.all(entries.map(walkEntry)).then(function (lists) {
+                        var flat = [].concat.apply([], lists);
+                        if (!flat.length) { pageDropOverlay.classList.remove('active'); return; }
+                        performUpload(flat);
+                    });
+                    return;
+                }
+
+                var files = e.dataTransfer && e.dataTransfer.files;
+                if (files && files.length) {
+                    setScanning();
+                    performUpload(entriesFromFileList(files));
+                }
+            });
+        }
+    })();
+</script>
+{% endblock %}

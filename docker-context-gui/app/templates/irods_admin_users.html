@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  /* User rows: avatar + name cell. Everything else (container, cards,
+     tables, badges, buttons, inputs) comes from static/style.css. */
+  .inline-form input[type="text"] { flex: 1; }
+  .user-cell { display: flex; align-items: center; gap: 12px; }
+  .user-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: #FFF; color: var(--green-dark);
+    font-weight: 700; font-size: 0.8rem;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .user-cell .user-name { font-weight: 600; color: var(--text); }
+  .home-path { color: var(--text-muted); font-family: monospace; font-size: 0.85rem; }
+  .data-table td { vertical-align: middle; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+
+    <div class="page-header">
+        <div class="icon-badge"><i class="fa-solid fa-users-gear"></i></div>
+        <div style="flex: 1;">
+            <h2>Manage Users</h2>
+            <p class="page-sub">Zone: {{ zone }} &middot; {{ users|length }} user{{ 's' if users|length != 1 else '' }}</p>
+        </div>
+        <button type="button" class="btn btn-primary" id="create-user-btn">
+            <i class="fa-solid fa-user-plus"></i> Create User
+        </button>
+    </div>
+
+    <div class="card card--compact card--inline" id="create-user-panel" hidden>
+        <form class="inline-form" method="POST" action="{{ url_for('irods_admin.create_user') }}">
+            <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+            <input type="text" name="username" placeholder="Keycloak username (e.g. jdoe)" required autofocus>
+            <button type="submit" class="btn btn-primary"><i class="fa-solid fa-check"></i> Create</button>
+            <button type="button" class="btn btn-ghost" data-close="create-user-panel">Cancel</button>
+        </form>
+    </div>
+    <p class="hint" style="margin-top:-14px;">
+        The username must exactly match the person's Keycloak username - that's what
+        makes this "one account for the whole project". A home folder
+        (<code>/{{ zone }}/home/&lt;username&gt;</code>) is created automatically and owned by them.
+    </p>
+
+    <div class="filter-field">
+        <input type="text" id="user-search" placeholder="Search users">
+        <select id="role-filter">
+            <option value="">All Roles</option>
+            <option value="rodsadmin">Admin</option>
+            <option value="groupadmin">Group Admin</option>
+            <option value="rodsuser">User</option>
+        </select>
+    </div>
+
+    <div class="card card--flush">
+        <div class="card-body" style="padding-top: 22px;">
+        {% if users %}
+        <table class="data-table" id="users-table">
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Role</th>
+                    <th>Home Folder</th>
+                    <th class="col-actions"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr data-name="{{ user.name|lower }}" data-role="{{ user.type }}">
+                    <td>
+                        <div class="user-cell">
+                            <div class="user-avatar">{{ user.name[:2]|upper }}</div>
+                            <span class="user-name">{{ user.name }}</span>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge {{ 'badge-admin' if user.type == 'rodsadmin' else ('badge-groupadmin' if user.type == 'groupadmin' else 'badge-user') }}">
+                            {{ 'Admin' if user.type == 'rodsadmin' else ('Group Admin' if user.type == 'groupadmin' else 'User') }}
+                        </span>
+                    </td>
+                    <td class="home-path">/{{ zone }}/home/{{ user.name }}</td>
+                    <td class="col-actions">
+                        {% if user.type != 'rodsadmin' %}
+                        <form method="POST" action="{{ url_for('irods_admin.delete_user') }}"
+                              onsubmit="return confirm('Remove iRODS user {{ user.name }}? Their files are kept, but they lose access.');"
+                              style="display:inline;">
+                            <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+                            <input type="hidden" name="username" value="{{ user.name }}">
+                            <button type="submit" class="icon-btn danger" title="Remove user"><i class="fa-solid fa-trash"></i></button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p class="hint" id="no-results-msg" hidden style="padding: 20px; text-align:center;">No users match your search.</p>
+        {% else %}
+        <p class="hint" style="padding: 20px 0;">No iRODS users found.</p>
+        {% endif %}
+        </div>
+    </div>
+
+    <div class="card card--flush">
+        <div class="card-header">
+            <h3><i class="fa-solid fa-people-group"></i> Groups</h3>
+            <p class="hint">
+                Prefer groups over per-person grants. Give a group access to a collection
+                <em>once</em>, then control who can see it by changing who is in the group -
+                no need to touch the collection's permissions again.
+            </p>
+        </div>
+        <div class="card-body">
+            <form class="inline-form" method="POST" action="{{ url_for('irods_admin.create_group') }}" style="margin-bottom: 20px;">
+                <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+                <input type="text" name="name" placeholder="New group name (e.g. wp4-team)" required>
+                <button type="submit" class="btn btn-secondary"><i class="fa-solid fa-plus"></i> Create Group</button>
+            </form>
+
+            {% if groups %}
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Group</th>
+                        <th>Members</th>
+                        <th class="col-actions">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for group in groups %}
+                    <tr>
+                        <td><strong>{{ group }}</strong></td>
+                        <td>
+                            {% for member in memberships.get(group, []) %}
+                                <span class="badge">{{ member }}</span>
+                                {% if group not in protected_groups %}
+                                <form method="POST" action="{{ url_for('irods_admin.modify_membership') }}" style="display:inline;">
+                                    <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+                                    <input type="hidden" name="group" value="{{ group }}">
+                                    <input type="hidden" name="username" value="{{ member }}">
+                                    <input type="hidden" name="action" value="remove">
+                                    <button type="submit" class="icon-btn danger" title="Remove {{ member }} from {{ group }}" style="width:auto; height:auto; padding:0 4px;">&times;</button>
+                                </form>
+                                {% endif %}
+                            {% else %}
+                                <span class="hint" style="margin:0;">No members yet.</span>
+                            {% endfor %}
+                        </td>
+                        <td class="col-actions">
+                            {% if group not in protected_groups %}
+                            <form method="POST" action="{{ url_for('irods_admin.modify_membership') }}" style="display:inline-flex; gap:6px; align-items:center;">
+                                <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+                                <input type="hidden" name="group" value="{{ group }}">
+                                <input type="hidden" name="action" value="add">
+                                <select name="username">
+                                    {% for user in users %}
+                                    <option value="{{ user.name }}">{{ user.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <button type="submit" class="icon-btn" title="Add member"><i class="fa-solid fa-user-plus"></i></button>
+                            </form>
+                            <form method="POST" action="{{ url_for('irods_admin.delete_group') }}"
+                                  onsubmit="return confirm('Remove group {{ group }}? Anything shared with it becomes inaccessible to its members.');"
+                                  style="display:inline;">
+                                <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+                                <input type="hidden" name="name" value="{{ group }}">
+                                <button type="submit" class="icon-btn danger" title="Remove group"><i class="fa-solid fa-trash"></i></button>
+                            </form>
+                            {% else %}
+                            <span class="hint" style="margin:0;">managed by iRODS</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="hint">No groups yet.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        var createBtn = document.getElementById('create-user-btn');
+        var createPanel = document.getElementById('create-user-panel');
+        if (createBtn && createPanel) {
+            createBtn.addEventListener('click', function () {
+                createPanel.hidden = false;
+                var input = createPanel.querySelector('input[name="username"]');
+                if (input) input.focus();
+            });
+        }
+        document.querySelectorAll('[data-close]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var panel = document.getElementById(btn.dataset.close);
+                if (panel) panel.hidden = true;
+            });
+        });
+
+        var searchInput = document.getElementById('user-search');
+        var roleFilter = document.getElementById('role-filter');
+        var table = document.getElementById('users-table');
+        var noResults = document.getElementById('no-results-msg');
+        if (table) {
+            var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
+            function applyFilter() {
+                var query = (searchInput.value || '').trim().toLowerCase();
+                var role = roleFilter.value;
+                var visibleCount = 0;
+                rows.forEach(function (row) {
+                    var matchesQuery = !query || row.dataset.name.indexOf(query) !== -1;
+                    var matchesRole = !role || row.dataset.role === role;
+                    var show = matchesQuery && matchesRole;
+                    row.style.display = show ? '' : 'none';
+                    if (show) visibleCount++;
+                });
+                if (noResults) noResults.hidden = visibleCount !== 0;
+            }
+            if (searchInput) searchInput.addEventListener('input', applyFilter);
+            if (roleFilter) roleFilter.addEventListener('change', applyFilter);
+        }
+    })();
+</script>
+{% endblock %}

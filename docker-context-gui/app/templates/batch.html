@@ -1,0 +1,1583 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  /* Batch processing wizard. The container, cards, buttons, inputs, tables,
+     status badges, progress bar, icon buttons and modal shell are all shared
+     (static/style.css); what is left here is the wizard's own furniture -
+     step numbers, the tool picker, the drop zone and the series info cards. */
+  .card h2 .step-num {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--green);
+    color: #fff; font-size: 0.8rem; display: inline-flex; align-items: center;
+    justify-content: center; flex-shrink: 0;
+  }
+  .card .hint { margin: 0 0 16px; }
+
+  .choice-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .well--option {
+    flex: 1; min-width: 220px; border: 2px solid var(--border);
+    cursor: pointer; transition: border-color .15s ease;
+  }
+  .well--option.selected { border-color: var(--green); background: rgba(102,153,0,0.08); }
+  .well--option input[type="radio"] { margin-right: 8px; }
+  .well--option .choice-title { font-weight: 600; }
+  .well--option .choice-desc { color: var(--text-muted); font-size: 0.82rem; margin-top: 4px; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .drop-zone {
+    border: 2px dashed var(--border-strong); border-radius: 10px; padding: 28px;
+    text-align: center; color: var(--text-muted); cursor: pointer; position: relative;
+  }
+  .drop-zone.dragging, .drop-zone.scanning {
+    border-color: var(--green); background: rgba(102,153,0,0.08); color: #fff;
+  }
+  .drop-zone.scanning { cursor: default; }
+  .drop-zone i { font-size: 1.6rem; margin-bottom: 8px; display: block; }
+  .staged-summary { margin-top: 12px; font-size: 0.88rem; color: var(--text-dim); }
+  .staged-summary strong { color: var(--success); }
+
+  .irods-pick-row { display: flex; gap: 10px; align-items: center; }
+  .irods-pick-row input[type="text"] { flex: 1; font-family: monospace; font-size: 0.85rem; }
+
+  /* --- Step 2 clinical layout: modality tabs (MRI/CT) > topic tabs (Tumor,
+     Volumetry, ...) > tool cards. Tabs use a folder-tab look (raised active
+     tab in green, connected to its panel below by a matching green border,
+     like an Excel sheet tab) rather than the plain shared .tab-btn style,
+     since this is the page's primary navigation for Step 2 and needs to
+     "pop" as much as the liked radio cards above it. A tool card is a
+     headline (no checkbox of its own) over its always-visible sub-tools
+     (modes) - each sub-tool is its own small selectable row, styled with
+     the same border/tint formula as .well--option so checking one reads
+     the same way checking a radio card does. */
+  /* No position/z-index/negative-margin on the row, the tabs, or the panel:
+     an earlier version pulled each tab 2px down (margin-bottom: -2px) to
+     overlap the panel's top border and hide the seam, with z-index to pick
+     which side painted over the other there - fragile, since it depended
+     on the tab's rendered height matching that 2px exactly, and gave the
+     row its own stacking context, which trapped everything painted inside
+     the panel - including the required-series (i) info-card popup, which
+     needs to float above the tabs when hovered - behind the row as a
+     whole. Sitting the tab's border-less bottom edge directly against the
+     panel's top border (zero overlap) can't bleed into or get cut off by
+     it either way, tab height math aside. */
+  .folder-tabs { display: flex; flex-wrap: wrap; gap: 5px; }
+  .folder-tab {
+    background: var(--surface-hover); color: var(--text-muted);
+    border: 2px solid var(--border); border-bottom: none;
+    border-radius: 8px 8px 0 0; padding: 10px 18px;
+    font-family: inherit; font-weight: 600; font-size: 0.92rem; cursor: pointer;
+    display: flex; align-items: center; gap: 8px; transition: all .15s ease;
+  }
+  .folder-tab:hover { color: #fff; border-color: var(--border-strong); }
+  .folder-tab.active {
+    background: var(--card-bg); border-color: var(--green);
+    color: #fff;
+  }
+  .folder-panel { border: 2px solid var(--green); border-radius: 0 10px 10px 10px; padding: 20px; }
+
+  /* Topic tabs (Tumor, Volumetry, ...) sit inside the already-framed
+     .folder-panel with no panel of their own underneath, so the boxed
+     folder-tab look (which implies "opens into the box below") doesn't
+     apply here - a plain underline marks the active one instead. */
+  .folder-tabs--topic {
+    gap: 18px; margin-bottom: 18px; border-bottom: 1px solid var(--border);
+  }
+  .folder-tabs--topic .folder-tab {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    border-radius: 0; margin-bottom: -1px; padding: 0 0 8px;
+    font-size: 0.85rem; font-weight: 600;
+  }
+  .folder-tabs--topic .folder-tab:hover { border-color: var(--border-strong); }
+  .folder-tabs--topic .folder-tab.active { background: none; border-bottom-color: var(--green); }
+
+  .group-panel, .topic-panel { display: none; }
+  .group-panel.active, .topic-panel.active { display: block; }
+
+  .tool-cards { display: flex; flex-wrap: wrap; gap: 14px; }
+  .tool-card {
+    flex: 1; min-width: 280px; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 16px 18px;
+  }
+  .tool-card.disabled { opacity: 0.5; }
+  .tool-card-title {
+    margin: 0 0 4px; font-size: 1rem; font-weight: 700; color: #fff;
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  }
+  .tool-card-desc { margin: 0 0 12px; color: var(--text-muted); font-size: 0.85rem; }
+  .badge-soon { font-size: 0.72rem; }
+
+  .mode-list { display: flex; flex-direction: column; gap: 8px; }
+  .mode-row {
+    display: flex; align-items: flex-start; gap: 9px;
+    border: 2px solid var(--border); border-radius: var(--radius-sm);
+    padding: 9px 12px; cursor: pointer; transition: border-color .15s ease;
+  }
+  .mode-row:hover { border-color: var(--border-strong); }
+  .mode-row.selected { border-color: var(--green); background: rgba(102,153,0,0.08); }
+  .mode-row.disabled { opacity: 0.5; cursor: not-allowed; }
+  .mode-row input[type="checkbox"] { margin-top: 2px; flex-shrink: 0; }
+  .mode-row .mode-label { font-size: 0.87rem; color: #ddd; }
+  .mode-row .series-req { margin-top: 6px; }
+
+  /* --- Required-series info cards: an (i) badge per series role,
+     showing the naming convention SERIES_CRITERIA (API/app/backend_helpers.py)
+     actually matches against, since a mis-named series folder otherwise
+     just silently fails to match with no explanation until the job runs. */
+  .series-req { margin-top: 10px; display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .series-req .series-req-label { color: var(--text-faint); font-size: 0.76rem; text-transform: uppercase; letter-spacing: .03em; }
+  .info-tip {
+    position: relative; display: inline-flex; align-items: center; gap: 5px;
+    background: #2a2a2a; border-radius: 10px; padding: 3px 9px 3px 7px;
+    font-size: 0.78rem; color: #ddd; cursor: help;
+  }
+  .info-tip i.fa-circle-info { color: var(--info); font-size: 0.85em; }
+  .info-tip .info-card {
+    display: none; position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 50%;
+    transform: translateX(-50%); width: 270px; background: #181818; border: 1px solid var(--border-strong);
+    border-radius: 10px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    text-align: left; white-space: normal; font-size: 0.78rem; color: #ddd; line-height: 1.55;
+    cursor: default; margin-bottom: 0;
+  }
+  .info-tip:hover .info-card, .info-tip:focus .info-card, .info-tip:focus-within .info-card { display: block; }
+  .info-card .info-card-title { font-weight: 700; color: #fff; }
+  .info-card .info-card-modality { color: var(--text-muted); font-weight: 400; font-size: 0.82em; }
+  .info-card dl { margin: 8px 0 0; }
+  .info-card dt { color: var(--text-muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: .03em; margin-top: 7px; }
+  .info-card dt:first-child { margin-top: 0; }
+  .info-card dd { margin: 2px 0 0; }
+  .info-card code { background: var(--card-bg); border-radius: 4px; padding: 1px 5px; font-size: 0.92em; color: var(--success); }
+  .info-card .info-card-note { margin: 9px 0 0; color: var(--text-faint); font-size: 0.74rem; }
+
+  #submit-row { display: flex; align-items: center; gap: 14px; }
+  #submit-error { color: var(--danger); font-size: 0.88rem; }
+
+  /* --- Progress panel --- */
+  .progress-summary { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; }
+  .progress-stat { text-align: center; }
+  .progress-stat .num { font-size: 1.4rem; font-weight: 700; display: block; }
+  .progress-stat .label { color: var(--text-muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: .04em; }
+  .progress-stat.pending .num { color: var(--text-muted); }
+  .progress-stat.running .num { color: var(--info); }
+  .progress-stat.done .num { color: var(--success); }
+  .progress-stat.partial .num { color: var(--warn); }
+  .progress-stat.failed .num { color: var(--danger); }
+  .progress-stat.stopped .num { color: var(--danger); }
+
+  .data-table th, .data-table td { padding: 8px 10px; }
+  .data-table .case-error { color: var(--danger); font-size: 0.8rem; }
+  .tool-status-list { display: flex; flex-direction: column; gap: 4px; }
+  .tool-status-row { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; }
+  .tool-status-row .tool-status-name { color: var(--text-dim); min-width: 170px; }
+  .tool-status-row .case-error { font-size: 0.78rem; }
+
+  .job-irods-pick-row { flex: 1; min-width: 260px; }
+  .job-irods-pick-row input[type="text"] { min-width: 0; }
+  .push-result-msg { font-size: 0.85rem; }
+  .preliminary-note { font-size: 0.85rem; color: var(--warn); flex-basis: 100%; }
+  .push-result-msg.error { color: var(--danger); }
+  .push-result-msg.success { color: var(--success); }
+
+  /* --- Your Batch Jobs: list of live/past job cards --- */
+  .card h2 { flex-wrap: wrap; }
+  .card .job-id { font-family: monospace; font-size: 0.75rem; color: var(--text-muted); font-weight: 400; }
+  .card .job-submitted { font-size: 0.75rem; color: #777; font-weight: 400; margin-left: auto; }
+  .card .job-duration { font-size: 0.75rem; color: #777; font-weight: 400; }
+  .card .job-status-badge { font-weight: 400; }
+  .badge.pausing, .badge.stopping { background: var(--warn-bg); color: var(--warn); }
+  .badge.paused { background: var(--surface-hover); color: var(--text-muted); }
+  .badge.stopped { background: var(--danger-bg); color: var(--danger); }
+  .case-details { margin-top: 4px; }
+  .case-details summary { cursor: pointer; color: var(--text-dim); font-size: 0.85rem; margin-bottom: 10px; }
+  .case-details summary:hover { color: #fff; }
+
+  /* --- iRODS picker modal: a full browser in an iframe, so it overrides the
+     shared .modal-card size and drops its padding entirely. --- */
+  .modal-card.picker-card {
+    background: var(--page-bg); padding: 0;
+    width: 900px; max-width: calc(100vw - 60px);
+    height: 640px; max-height: calc(100vh - 60px);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .picker-card .picker-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .picker-card iframe { flex: 1; border: 0; width: 100%; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="page-header">
+        <div class="icon-badge"><i class="fa-solid fa-layer-group"></i></div>
+        <div>
+            <h2>Batch Processing</h2>
+            <p class="page-sub">Run an AI tool over a whole cohort.</p>
+        </div>
+    </div>
+    <p class="hint">
+        Input folders are expected as <code>patient_id/study_name/series_name/</code>
+        (series may be DICOM or NIfTI).
+    </p>
+
+    <div class="card">
+        <h2 style="justify-content: space-between;">
+            <span><i class="fa-solid fa-clock-rotate-left"></i> Your Batch Jobs</span>
+            <button type="button" class="btn btn-ghost" id="clear-jobs-btn" style="display:none;">
+                <i class="fa-solid fa-broom"></i> Clear history
+            </button>
+        </h2>
+        <p class="hint">
+            Jobs you've submitted, including still-running ones.
+        </p>
+        <p class="hint" id="jobs-empty">No batch jobs yet - submit one below.</p>
+        <div id="jobs-list"></div>
+    </div>
+
+    <form id="batch-form">
+
+    <div class="card">
+        <h2><span class="step-num">1</span> Input</h2>
+        <p class="hint">Choose the cohort to process.</p>
+
+        <div class="choice-row">
+            <label class="well well--option choice-option" data-choice="input_source" data-value="upload">
+                <input type="radio" name="input_source" value="upload" checked>
+                <span class="choice-title">Upload a folder</span>
+                <div class="choice-desc">Use a folder from your computer.</div>
+            </label>
+            <label class="well well--option choice-option" data-choice="input_source" data-value="irods">
+                <input type="radio" name="input_source" value="irods">
+                <span class="choice-title">Pick from iRODS</span>
+                <div class="choice-desc">Use a cohort already staged in your iRODS space.</div>
+            </label>
+        </div>
+
+        <div class="panel active" id="panel-input_source-upload">
+            <div class="drop-zone" id="input-drop-zone">
+                <div id="input-drop-zone-content">
+                    <i class="fa-solid fa-folder-open"></i>
+                    Drag and drop your cohort folder here, or click to choose one.
+                </div>
+            </div>
+            <p class="hint" style="margin-top:8px;">
+                Your folder must follow this structure: <code>your_cohort_folder/patient_id/study_name/series_name/...</code>.
+            </p>
+            <input type="file" id="input-file-picker" webkitdirectory directory multiple hidden>
+            <div class="staged-summary" id="staged-summary">No folder chosen yet.</div>
+            <div id="upload-progress" style="display:none; margin-top:14px;">
+                <div class="progress-bar-track"><div class="progress-bar-fill" id="upload-progress-fill" style="width:0%;"></div></div>
+                <p class="hint" id="upload-progress-text" style="margin-top:6px;"></p>
+            </div>
+        </div>
+
+        <div class="panel" id="panel-input_source-irods">
+            <div class="irods-pick-row">
+                <input type="text" id="irods-input-path" placeholder="No folder selected" readonly>
+                <button type="button" class="btn btn-secondary" data-picker-open data-picker-target="irods-input-path">
+                    <i class="fa-solid fa-hard-drive"></i> Browse iRODS&hellip;
+                </button>
+            </div>
+            <div id="irods-stage-progress" style="display:none; margin-top:14px;">
+                <div class="progress-bar-track"><div class="progress-bar-fill" id="irods-stage-fill" style="width:0%;"></div></div>
+                <p class="hint" id="irods-stage-text" style="margin-top:6px;"></p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2><span class="step-num">2</span> Tools</h2>
+        <p class="hint">
+            Pick which tool(s) to run over every study in the cohort. You can run more than one tool at the same time.
+        </p>
+
+        <div class="choice-row">
+            <label class="well well--option choice-option" data-choice="series_pick" data-value="best">
+                <input type="radio" name="series_pick" value="best" checked>
+                <span class="choice-title">Use the best-matching series</span>
+                <div class="choice-desc">
+                    Each required series role is filled by the single best-matching series in a study.
+                </div>
+            </label>
+            <label class="well well--option choice-option" data-choice="series_pick" data-value="all">
+                <input type="radio" name="series_pick" value="all">
+                <span class="choice-title">Use every matching series</span>
+                <div class="choice-desc">
+                    Run every series that meets a role's requirements, each as its own result.
+                    Does not apply to BraTS, FastSurfer Longitudinal, or SIENA/SIENAX, which
+                    always use their single best match.
+                </div>
+            </label>
+        </div>
+
+        {% macro series_role_badge(role_id) %}
+        {% set info = series_role_info.get(role_id) %}
+        <span class="info-tip" tabindex="0">
+            <i class="fa-solid fa-circle-info"></i>{{ role_id }}
+            {% if info %}
+            <span class="info-card">
+                <span class="info-card-title">{{ info.label }} <span class="info-card-modality">({{ info.modality }})</span></span>
+                <dl>
+                    {% if info.must_contain %}
+                    <dt>Name must contain</dt>
+                    <dd>{% for kw in info.must_contain %}<code>{{ kw }}</code>{{ ", " if not loop.last }}{% endfor %}</dd>
+                    {% endif %}
+                    {% if info.or_contain %}
+                    <dt>...and at least one of</dt>
+                    <dd>{% for kw in info.or_contain %}<code>{{ kw }}</code>{{ ", " if not loop.last }}{% endfor %}</dd>
+                    {% endif %}
+                    {% if info.should_contain %}
+                    <dt>Better match if it also contains</dt>
+                    <dd>{% for kw in info.should_contain %}<code>{{ kw }}</code>{{ ", " if not loop.last }}{% endfor %}</dd>
+                    {% endif %}
+                    {% if info.mustnt_contain %}
+                    <dt>Must NOT contain</dt>
+                    <dd>{% for kw in info.mustnt_contain %}<code>{{ kw }}</code>{{ ", " if not loop.last }}{% endfor %}</dd>
+                    {% endif %}
+                    <dt>Example series/folder name</dt>
+                    <dd><code>{{ info.example }}</code></dd>
+                </dl>
+                <p class="info-card-note">Matching is case-insensitive and checks the whole series description (DICOM) or folder name (NIfTI).</p>
+            </span>
+            {% endif %}
+        </span>
+        {% endmacro %}
+
+        <div class="folder-tabs" role="tablist">
+            {% for group in tool_groups %}
+            <button type="button" class="folder-tab {{ 'active' if loop.first else '' }}"
+                    data-group-target="group-panel-{{ loop.index0 }}">
+                {% if group.icon %}<i class="fa-solid {{ group.icon }}"></i>
+                {% elif group.icon_svg %}<i>{{ group.icon_svg | safe }}</i>{% endif %}
+                {{ group.label }}
+                <span class="badge badge-neutral tab-count" hidden></span>
+            </button>
+            {% endfor %}
+        </div>
+
+        {% for group in tool_groups %}
+        {% set gi = loop.index0 %}
+        {# Which of this group's categories holds the pre-checked default
+           tool, so that tool isn't hidden behind an inactive topic tab on
+           first load; falls back to the first category if none match
+           (true for every group except the one containing default_tool). #}
+        {% set ns = namespace(default_ci=0) %}
+        {% for cat in group.categories %}
+            {% if cat.entries | selectattr("id", "equalto", default_tool) | list | length > 0 %}
+                {% set ns.default_ci = loop.index0 %}
+            {% endif %}
+        {% endfor %}
+        <div class="group-panel {{ 'active' if loop.first else '' }}" id="group-panel-{{ gi }}">
+            <div class="folder-panel">
+                {% if group.categories|length > 1 %}
+                <div class="folder-tabs folder-tabs--topic" role="tablist">
+                    {% for cat in group.categories %}
+                    <button type="button" class="folder-tab {{ 'active' if loop.index0 == ns.default_ci else '' }}"
+                            data-topic-target="topic-panel-{{ gi }}-{{ loop.index0 }}">
+                        {{ cat.label }}
+                        <span class="badge badge-neutral tab-count" hidden></span>
+                    </button>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                {% for cat in group.categories %}
+                <div class="topic-panel {{ 'active' if loop.index0 == ns.default_ci else '' }}" id="topic-panel-{{ gi }}-{{ loop.index0 }}">
+                    {% if group.categories|length == 1 %}<h4 class="tool-category-title">{{ cat.label }}</h4>{% endif %}
+                    <div class="tool-cards">
+                        {% for tool in cat.entries %}
+                        <div class="tool-card {{ '' if tool.enabled else 'disabled' }}">
+                            <h5 class="tool-card-title">
+                                {{ tool.label }}
+                                {% if not tool.enabled %}<span class="badge badge-soon">Coming soon</span>{% endif %}
+                            </h5>
+                            <p class="tool-card-desc">{{ tool.description }}</p>
+
+                            {% if tool.series_roles %}
+                            <div class="series-req">
+                                <span class="series-req-label">Required series:</span>
+                                {% for role_id in tool.series_roles %}{{ series_role_badge(role_id) }}{% endfor %}
+                            </div>
+                            {% endif %}
+
+                            {% if tool.enabled and tool.modes %}
+                            <div class="mode-list">
+                                {% for m in tool.modes %}
+                                <label class="mode-row">
+                                    <input type="checkbox" name="mode_{{ tool.id }}" value="{{ m.id }}"
+                                           id="mode-{{ tool.dom_id }}-{{ m.id }}"
+                                           {{ 'checked' if (tool.id == default_tool and loop.first) else '' }}>
+                                    <span>
+                                        <span class="mode-label">{{ m.label }}</span>
+                                        {% if m.series_roles %}
+                                        <span class="series-req">
+                                            {% for role_id in m.series_roles %}{{ series_role_badge(role_id) }}{% endfor %}
+                                        </span>
+                                        {% endif %}
+                                    </span>
+                                </label>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="card">
+        <h2><span class="step-num">3</span> Run</h2>
+        <p class="hint">
+            Once the job finishes you'll be able to download the results as a
+            ZIP and/or push them into an iRODS folder.
+        </p>
+        <div id="submit-row">
+            <button type="submit" class="btn btn-primary" id="submit-btn">
+                <i class="fa-solid fa-play"></i> Start batch
+            </button>
+            <span id="submit-stage-text" class="hint" style="margin:0;"></span>
+            <span id="submit-error"></span>
+        </div>
+    </div>
+
+    </form>
+</div>
+
+<template id="job-card-template">
+    <div class="card job-card">
+        <h2>
+            <i class="fa-solid fa-list-check"></i>
+            <span class="job-label"></span>
+            <span class="job-id"></span>
+            <span class="badge job-status-badge" style="display:none;"></span>
+            <span class="job-submitted"></span>
+            <span class="job-duration"></span>
+            <a class="icon-btn download-partial-btn" title="Download finished studies so far (without pausing)" style="display:none;" href="#">
+                <i class="fa-solid fa-download"></i>
+            </a>
+            <button type="button" class="icon-btn pause-job-btn" title="Pause this job" style="display:none;">
+                <i class="fa-solid fa-pause"></i>
+            </button>
+            <button type="button" class="icon-btn resume-job-btn" title="Resume this job" style="display:none;">
+                <i class="fa-solid fa-play"></i>
+            </button>
+            <button type="button" class="icon-btn danger stop-job-btn" title="Stop this job" style="display:none;">
+                <i class="fa-solid fa-stop"></i>
+            </button>
+            <button type="button" class="icon-btn danger delete-job-btn" title="Delete this job from history">
+                <i class="fa-solid fa-trash"></i>
+            </button>
+        </h2>
+
+        <div class="progress-summary">
+            <div class="progress-stat pending"><span class="num stat-pending">0</span><span class="label">Pending</span></div>
+            <div class="progress-stat running"><span class="num stat-running">0</span><span class="label">Running</span></div>
+            <div class="progress-stat done"><span class="num stat-done">0</span><span class="label">Done</span></div>
+            <div class="progress-stat partial"><span class="num stat-partial">0</span><span class="label">Partial</span></div>
+            <div class="progress-stat failed"><span class="num stat-failed">0</span><span class="label">Failed</span></div>
+            <div class="progress-stat stopped" style="display:none;"><span class="num stat-stopped">0</span><span class="label">Stopped</span></div>
+        </div>
+        <div class="progress-bar-track">
+            <div class="progress-bar-fill fill-done" style="width:0%;"></div>
+            <div class="progress-bar-fill fill-partial" style="width:0%; background:#e0a640;" title="Partial"></div>
+            <div class="progress-bar-fill failed-fill fill-failed" style="width:0%;"></div>
+            <div class="progress-bar-fill fill-stopped" style="width:0%; background:var(--text-faint);" title="Stopped"></div>
+        </div>
+
+        <details class="case-details">
+            <summary>Per-case detail</summary>
+            <table class="data-table">
+                <thead><tr><th>Case</th><th>Status</th><th>Tools</th></tr></thead>
+                <tbody class="case-table-body"></tbody>
+            </table>
+        </details>
+
+        <div class="actions result-actions" style="display:none;">
+            <span class="preliminary-note" style="display:none;">
+                <i class="fa-solid fa-triangle-exclamation"></i> Preliminary results only (job was paused/stopped before finishing)
+            </span>
+            <a class="btn btn-secondary download-zip-link" href="#">
+                <i class="fa-solid fa-download"></i> Download ZIP
+            </a>
+            <div class="irods-pick-row job-irods-pick-row">
+                <input type="text" class="job-irods-path" placeholder="No iRODS destination selected" readonly>
+                <button type="button" class="btn btn-secondary job-irods-browse-btn">
+                    <i class="fa-solid fa-hard-drive"></i> Browse iRODS&hellip;
+                </button>
+            </div>
+            <button type="button" class="btn btn-primary push-irods-btn">
+                <i class="fa-solid fa-hard-drive"></i> Push to iRODS
+            </button>
+            <span class="push-result-msg"></span>
+        </div>
+    </div>
+</template>
+
+<div class="modal-overlay" id="picker-modal" hidden>
+    <div class="modal-card picker-card">
+        <div class="picker-header">
+            <strong><i class="fa-solid fa-hard-drive"></i> Choose an iRODS folder</strong>
+            <button type="button" class="btn btn-ghost" id="picker-close-btn">
+                <i class="fa-solid fa-xmark"></i> Close
+            </button>
+        </div>
+        <iframe id="picker-iframe" title="iRODS folder picker" src="about:blank"></iframe>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var API_BASE = {{ api_base|tojson }};
+    var IRODS_HOME = {{ irods_home|tojson }};
+
+    // ---------- choice cards (input source, series pick) ----------
+    document.querySelectorAll('.choice-option').forEach(function (opt) {
+        var radio = opt.querySelector('input[type="radio"]');
+        var choice = opt.dataset.choice;
+        function sync() {
+            document.querySelectorAll('.choice-option[data-choice="' + choice + '"]').forEach(function (o) {
+                o.classList.toggle('selected', o.querySelector('input').checked);
+            });
+            var activePanel = document.getElementById('panel-' + choice + '-' + radio.value);
+            if (activePanel) {
+                document.querySelectorAll('[id^="panel-' + choice + '-"]').forEach(function (p) {
+                    p.classList.remove('active');
+                });
+                activePanel.classList.add('active');
+            }
+        }
+        radio.addEventListener('change', sync);
+        if (radio.checked) sync();
+    });
+
+    // ---------- Step 2: modality tabs (MRI/CT) and topic tabs (Tumor, Volumetry, ...) ----------
+    // Only one group's tools are shown at a time, and within it only one
+    // topic's tools - but hidden panels' inputs stay in the DOM and enabled,
+    // so a tool checked under one tab and another checked under a different
+    // tab both still submit together (the submit-time handler below finds
+    // every checked mode_* input regardless of which tab is currently
+    // showing).
+    document.querySelectorAll('[data-group-target]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            document.querySelectorAll('[data-group-target]').forEach(function (b) { b.classList.remove('active'); });
+            document.querySelectorAll('.group-panel').forEach(function (p) { p.classList.remove('active'); });
+            btn.classList.add('active');
+            document.getElementById(btn.dataset.groupTarget).classList.add('active');
+        });
+    });
+    document.querySelectorAll('[data-topic-target]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var groupPanel = btn.closest('.group-panel');
+            groupPanel.querySelectorAll('[data-topic-target]').forEach(function (b) { b.classList.remove('active'); });
+            groupPanel.querySelectorAll('.topic-panel').forEach(function (p) { p.classList.remove('active'); });
+            btn.classList.add('active');
+            document.getElementById(btn.dataset.topicTarget).classList.add('active');
+        });
+    });
+
+    // A tab's own tools are hidden while another tab is active, so this
+    // keeps a small count badge on every group and topic tab showing how
+    // many of its tools are checked - otherwise a selection made before
+    // switching tabs would be easy to forget about.
+    function updateTabCounts() {
+        document.querySelectorAll('[data-group-target], [data-topic-target]').forEach(function (btn) {
+            var targetId = btn.dataset.groupTarget || btn.dataset.topicTarget;
+            var panel = document.getElementById(targetId);
+            var count = panel.querySelectorAll('input[name^="mode_"]:checked').length;
+            var badge = btn.querySelector('.tab-count');
+            badge.hidden = count === 0;
+            badge.textContent = count;
+        });
+    }
+
+    // ---------- Step 2: sub-tool (mode) selection ----------
+    // A tool is just a headline over its always-visible sub-tools now (no
+    // separate "select this tool first" checkbox) - each sub-tool row is
+    // its own checkbox, styled with the same border/tint as the liked
+    // .well--option radio cards so checking one reads the same way.
+    document.querySelectorAll('.mode-row input[type="checkbox"]').forEach(function (input) {
+        function sync() {
+            input.closest('.mode-row').classList.toggle('selected', input.checked);
+            updateTabCounts();
+        }
+        input.addEventListener('change', sync);
+        sync();
+    });
+
+    // ---------- Step 1: folder-drop upload (adapted from irods_browser.html) ----------
+    var stagedFiles = []; // [{file, relPath}, ...]
+    // Paths the folder walk could not read (walkEntry). Non-empty means the
+    // staged cohort is incomplete, and submit refuses it: an unreadable file
+    // used to be dropped silently, which uploaded e.g. 462 of a series'
+    // 2019 slices and only surfaced later as a dcm2niix failure.
+    var stagedFailures = [];
+    var dropZone = document.getElementById('input-drop-zone');
+    var dropZoneContent = document.getElementById('input-drop-zone-content');
+    var dropZoneIdleHtml = dropZoneContent.innerHTML;
+    var filePicker = document.getElementById('input-file-picker');
+    var stagedSummary = document.getElementById('staged-summary');
+
+    function setStaged(files, failures) {
+        stagedFiles = files;
+        stagedFailures = failures || [];
+        if (!files.length && !stagedFailures.length) {
+            stagedSummary.textContent = 'No folder chosen yet.';
+            return;
+        }
+        var patients = {};
+        files.forEach(function (f) {
+            var top = f.relPath.split('/')[0];
+            patients[top] = true;
+        });
+        stagedSummary.innerHTML = '<strong>' + files.length + '</strong> file(s) staged across ' +
+            '<strong>' + Object.keys(patients).length + '</strong> top-level folder(s).';
+        if (stagedFailures.length) {
+            var warning = document.createElement('div');
+            warning.style.color = 'var(--danger, #c0392b)';
+            warning.style.marginTop = '6px';
+            warning.textContent = stagedFailures.length + ' file(s)/folder(s) could not be read by ' +
+                'the browser, so this cohort is incomplete and will not be submitted. Make sure ' +
+                'the folder is fully available locally (not online-only cloud files or a ' +
+                'disconnected network drive), then drop it again. First unreadable: ' +
+                stagedFailures.slice(0, 3).join(', ') + (stagedFailures.length > 3 ? ', ...' : '');
+            stagedSummary.appendChild(warning);
+        }
+    }
+
+    // A dropped folder's files only surface through the async FileSystem
+    // entry API (see walkEntry below), which can take several seconds on a
+    // large cohort with no feedback of its own - long enough that someone
+    // could think the drop just didn't register. This swaps the drop zone
+    // into a spinner state the instant a drop happens, back to normal once
+    // walkEntry resolves.
+    function setScanning(isScanning) {
+        dropZone.classList.toggle('scanning', isScanning);
+        dropZoneContent.innerHTML = isScanning
+            ? '<i class="fa-solid fa-spinner fa-spin"></i> Reading dropped folder…'
+            : dropZoneIdleHtml;
+    }
+
+    dropZone.addEventListener('click', function () { filePicker.click(); });
+    filePicker.addEventListener('change', function () {
+        var files = Array.prototype.map.call(filePicker.files, function (f) {
+            return { file: f, relPath: f.webkitRelativePath || f.name };
+        });
+        if (files.length) setStaged(files);
+    });
+
+    // dragenter/dragleave fire on every child element as the pointer moves
+    // over them, not just on entering/leaving the zone as a whole, so a
+    // naive add/remove flickers the border on and off while hovering over
+    // the icon or text inside the zone. A counter incremented on enter and
+    // decremented on leave only clears the class once it's genuinely back
+    // to zero (mirrors irods_browser.html's drop zone).
+    var dragCounter = 0;
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(function (evt) {
+        dropZone.addEventListener(evt, function (e) { e.preventDefault(); e.stopPropagation(); });
+    });
+    dropZone.addEventListener('dragenter', function () {
+        dragCounter++;
+        dropZone.classList.add('dragging');
+    });
+    dropZone.addEventListener('dragleave', function () {
+        dragCounter = Math.max(0, dragCounter - 1);
+        if (dragCounter === 0) dropZone.classList.remove('dragging');
+    });
+
+    // Like Promise.all(items.map(fn)), but with at most `limit` calls in
+    // flight: a series folder holds thousands of slices, and firing a
+    // file() read for every one of them at once is what lets some fail.
+    function mapLimited(items, limit, fn) {
+        var results = new Array(items.length);
+        var next = 0;
+        function worker() {
+            if (next >= items.length) return Promise.resolve();
+            var i = next++;
+            return fn(items[i]).then(function (r) { results[i] = r; return worker(); });
+        }
+        var workers = [];
+        for (var w = 0; w < Math.min(limit, items.length); w++) workers.push(worker());
+        return Promise.all(workers).then(function () { return results; });
+    }
+
+    // Resolves to the entry's files; any file or folder that can't be read
+    // is recorded in `failures` (by path) rather than silently skipped.
+    function walkEntry(entry, failures) {
+        return new Promise(function (resolve) {
+            if (entry.isFile) {
+                entry.file(function (file) {
+                    resolve([{ file: file, relPath: entry.fullPath.replace(/^\/+/, '') }]);
+                }, function () {
+                    failures.push(entry.fullPath.replace(/^\/+/, ''));
+                    resolve([]);
+                });
+            } else if (entry.isDirectory) {
+                var reader = entry.createReader();
+                var children = [];
+                (function readBatch() {
+                    reader.readEntries(function (batch) {
+                        if (!batch.length) {
+                            mapLimited(children, 16, function (child) {
+                                return walkEntry(child, failures);
+                            }).then(function (lists) {
+                                resolve([].concat.apply([], lists));
+                            });
+                            return;
+                        }
+                        children = children.concat(batch);
+                        readBatch();
+                    }, function () {
+                        failures.push(entry.fullPath.replace(/^\/+/, '') + '/');
+                        resolve([]);
+                    });
+                })();
+            } else {
+                resolve([]);
+            }
+        });
+    }
+
+    dropZone.addEventListener('drop', function (e) {
+        dragCounter = 0;
+        dropZone.classList.remove('dragging');
+        var items = e.dataTransfer && e.dataTransfer.items;
+        var entries = items && Array.prototype.map.call(items, function (item) {
+            return item.webkitGetAsEntry && item.webkitGetAsEntry();
+        }).filter(Boolean);
+
+        if (entries && entries.length) {
+            setScanning(true);
+            var failures = [];
+            Promise.all(entries.map(function (entry) { return walkEntry(entry, failures); })).then(function (lists) {
+                setScanning(false);
+                var flat = [].concat.apply([], lists);
+                if (flat.length || failures.length) setStaged(flat, failures);
+            });
+            return;
+        }
+        var files = e.dataTransfer && e.dataTransfer.files;
+        if (files && files.length) {
+            setStaged(Array.prototype.map.call(files, function (f) { return { file: f, relPath: f.name }; }));
+        }
+    });
+
+    // ---------- iRODS folder picker modal (reuses /irods/browse/?picker=1) ----------
+    var pickerModal = document.getElementById('picker-modal');
+    var pickerIframe = document.getElementById('picker-iframe');
+    var pickerTargetInput = null;
+
+    // Called both by static Browse buttons (data-picker-open, resolved to a
+    // fixed input by id) and by each finished job's own "Browse iRODS…"
+    // button (resolved to that job card's own input directly) - see
+    // ensureJobCard below.
+    function openPicker(targetInput) {
+        pickerTargetInput = targetInput;
+        pickerIframe.src = '/irods/browse/?picker=1&embedded=1';
+        pickerModal.hidden = false;
+    }
+
+    document.querySelectorAll('[data-picker-open]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            openPicker(document.getElementById(btn.dataset.pickerTarget));
+        });
+    });
+
+    function closePicker() {
+        pickerModal.hidden = true;
+        pickerIframe.src = 'about:blank';
+    }
+    document.getElementById('picker-close-btn').addEventListener('click', closePicker);
+    pickerModal.addEventListener('click', function (e) { if (e.target === pickerModal) closePicker(); });
+
+    window.addEventListener('message', function (e) {
+        if (e.origin !== window.location.origin) return;
+        if (e.data && e.data.type === 'irods-folder-picked' && pickerTargetInput) {
+            pickerTargetInput.value = e.data.path;
+            closePicker();
+        }
+    });
+
+    // ---------- Step 3: submit ----------
+    var form = document.getElementById('batch-form');
+    var submitBtn = document.getElementById('submit-btn');
+    var submitError = document.getElementById('submit-error');
+    var submitStageText = document.getElementById('submit-stage-text');
+    var irodsStageProgress = document.getElementById('irods-stage-progress');
+    var irodsStageFill = document.getElementById('irods-stage-fill');
+    var irodsStageText = document.getElementById('irods-stage-text');
+    var uploadProgress = document.getElementById('upload-progress');
+    var uploadProgressFill = document.getElementById('upload-progress-fill');
+    var uploadProgressText = document.getElementById('upload-progress-text');
+
+    function formatBytes(n) {
+        if (!n) return '0 MB';
+        var mb = n / (1024 * 1024);
+        return mb >= 1024 ? (mb / 1024).toFixed(2) + ' GB' : mb.toFixed(1) + ' MB';
+    }
+
+    function resetSubmitBtn() {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa-solid fa-play"></i> Start batch';
+        submitStageText.textContent = '';
+        uploadProgress.style.display = 'none';
+    }
+
+    // Once the cohort is on the API-facing side (uploaded, or already staged
+    // from iRODS) POST /batch/submit still has real work left before a
+    // job_id comes back: the API matches each study's series folders to the
+    // roles the selected tool(s) need and converts every match to NIfTI
+    // (batch_io.prepare_batch_for_tools), and - the first time a BraTS
+    // segmenter is used - pulls its docker image. None of that is visible
+    // to this page (no progress endpoint for it, unlike the iRODS stage-in
+    // above), so this rotates through a few honest, time-based hints rather
+    // than leaving the button's spinner as the only sign anything is
+    // happening - which is what made this phase look hung in the first place.
+    var PREPARING_HINTS = [
+        'Matching series to the selected tool(s)…',
+        'Converting matched series (this can take a while for a large cohort)…',
+        'Still working — the first run of a tool can take several minutes while its container image downloads…',
+    ];
+
+    function startPreparingHints(el) {
+        var i = 0;
+        el.textContent = PREPARING_HINTS[0];
+        return setInterval(function () {
+            i = Math.min(i + 1, PREPARING_HINTS.length - 1);
+            el.textContent = PREPARING_HINTS[i];
+        }, 9000);
+    }
+
+    // XHR, not fetch: only XMLHttpRequest exposes upload progress events,
+    // needed to show real feedback while a folder-drop upload's bytes are
+    // still going out over the network (see startJob's upload path below) -
+    // fetch's request streaming isn't reliably supported across browsers for
+    // this yet.
+    function postFormWithProgress(url, formData, onUploadProgress) {
+        return new Promise(function (resolve) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', url);
+            if (onUploadProgress) {
+                xhr.upload.addEventListener('progress', function (e) {
+                    if (e.lengthComputable) onUploadProgress(e.loaded, e.total);
+                });
+            }
+            xhr.onload = function () {
+                var data;
+                try {
+                    data = JSON.parse(xhr.responseText);
+                } catch (e) {
+                    // Same non-JSON-body case fetch's .then() handled below for
+                    // other calls on this page - a proxy/dev-server/WSGI layer
+                    // rejected the request before a route ran.
+                    data = { error: 'Server error (HTTP ' + xhr.status + ').' };
+                }
+                resolve({ ok: xhr.status >= 200 && xhr.status < 300, data: data });
+            };
+            xhr.onerror = function () {
+                resolve({ ok: false, data: { error: 'Network error while starting the batch job.' } });
+            };
+            xhr.send(formData);
+        });
+    }
+
+    // Every fetch() below expects JSON, but any layer that answers before a
+    // route does -- an unhandled exception's 500 page, a proxy error page, a
+    // session-expiry redirect to Keycloak's own login page -- replies with
+    // HTML. resp.json() then throws a SyntaxError ("Unexpected token '<'")
+    // which surfaces through the caller's .catch() *in place of* the real
+    // problem: a plain "permission denied creating the stage directory" once
+    // reached the user as an unreadable parse error, and was diagnosed as a
+    // session bug. Reading the body as text first keeps the HTTP status,
+    // which is the part actually worth showing. Mirrors what
+    // postFormWithProgress already does on the XHR path above.
+    function readJson(resp) {
+        return resp.text().then(function (body) {
+            var data;
+            try {
+                data = JSON.parse(body);
+            } catch (e) {
+                data = { error: 'Server error (HTTP ' + resp.status + ').' };
+            }
+            return { ok: resp.ok, data: data };
+        });
+    }
+
+    // Polls GET /batch/stage_status/<id> (see batch.py's _run_irods_stage)
+    // until the background download finishes or fails. A real 0.8 GB/~4500-
+    // file test cohort took 5-10 minutes to stage sequentially with no
+    // feedback at all, which just looked hung -- this is what replaced that.
+    function pollStageStatus(stageId, onDone, onError) {
+        fetch('/batch/stage_status/' + stageId)
+            .then(readJson)
+            .then(function (result) {
+                if (!result.ok) { onError(result.data.error || 'Lost track of the iRODS staging job.'); return; }
+                var s = result.data;
+                var pct = s.bytes_total ? Math.round((s.bytes_done / s.bytes_total) * 100)
+                    : (s.files_total ? Math.round((s.files_done / s.files_total) * 100) : 0);
+                irodsStageFill.style.width = pct + '%';
+                var stageMsg = 'Staging from iRODS: ' + s.files_done + ' / ' + s.files_total +
+                    ' file(s) (' + formatBytes(s.bytes_done) + ' / ' + formatBytes(s.bytes_total) + ')' +
+                    (s.note ? ' — ' + s.note : '');
+                irodsStageText.textContent = stageMsg;
+                submitStageText.textContent = stageMsg;
+                if (s.status === 'done') {
+                    onDone();
+                } else if (s.status === 'error') {
+                    onError(s.error || 'Staging from iRODS failed.');
+                } else {
+                    setTimeout(function () { pollStageStatus(stageId, onDone, onError); }, 1000);
+                }
+            })
+            .catch(function () {
+                // transient network hiccup -- keep retrying, the download
+                // itself keeps running server-side regardless of polling.
+                setTimeout(function () { pollStageStatus(stageId, onDone, onError); }, 2000);
+            });
+    }
+
+    form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        submitError.textContent = '';
+
+        var inputSource = form.querySelector('input[name="input_source"]:checked').value;
+        // Every checked sub-tool checkbox (name="mode_<tool>") contributes
+        // one {tool, mode} entry directly - there's no separate "select
+        // this tool first" checkbox any more, so the tool id is read straight
+        // off the field name. Checking more than one sub-tool under the same
+        // headline (e.g. two BraTS algorithms) runs all of them, each
+        // against every study. This also covers totalsegmentator, which is
+        // split into three cards under different clinical topics, all
+        // sharing name="mode_totalsegmentator": each card only ever renders
+        // its own distinct mode value (cerebral_bleed / brain_aneurysm /
+        // brain_structures), so a form-wide lookup can't cross-contaminate
+        // between them the way it could have with a shared per-tool checkbox.
+        var tools = [];
+        Array.prototype.forEach.call(form.querySelectorAll('input[name^="mode_"]:checked'), function (modeInput) {
+            tools.push({ tool: modeInput.name.slice('mode_'.length), mode: modeInput.value });
+        });
+        var irodsInputPath = document.getElementById('irods-input-path').value;
+
+        if (tools.length === 0) {
+            submitError.textContent = 'Choose at least one tool to run.';
+            return;
+        }
+        if (inputSource === 'upload' && stagedFailures.length) {
+            submitError.textContent = stagedFailures.length + ' file(s)/folder(s) of the dropped ' +
+                'folder could not be read, so the cohort would be incomplete - see the note above ' +
+                'and drop the folder again.';
+            return;
+        }
+        if (inputSource === 'upload' && stagedFiles.length === 0) {
+            submitError.textContent = 'Choose a folder to upload first.';
+            return;
+        }
+        if (inputSource === 'irods' && !irodsInputPath) {
+            submitError.textContent = 'Choose an iRODS folder first.';
+            return;
+        }
+
+        submitBtn.disabled = true;
+
+        function fail(message) {
+            resetSubmitBtn();
+            irodsStageProgress.style.display = 'none';
+            submitError.textContent = message;
+        }
+
+        // Actually starts the batch job, once the input (upload or
+        // already-staged iRODS dir) is ready on the API-facing side.
+        function startJob(stageId) {
+            submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Starting&hellip;';
+            var fd = new FormData();
+            fd.append('tools', JSON.stringify(tools));
+            fd.append('input_source', inputSource);
+            var seriesPickRadio = document.querySelector('input[name="series_pick"]:checked');
+            fd.append('use_all_series', (seriesPickRadio && seriesPickRadio.value === 'all') ? '1' : '0');
+            var isUpload = inputSource !== 'irods';
+            var uploadBytesTotal = 0;
+            if (inputSource === 'irods') {
+                fd.append('stage_id', stageId);
+            } else {
+                stagedFiles.forEach(function (entry) {
+                    fd.append('file', entry.file);
+                    fd.append('relpath', entry.relPath);
+                    uploadBytesTotal += entry.file.size || 0;
+                });
+            }
+
+            var preparingTimer = null;
+            function stopPreparingHints() {
+                if (preparingTimer) { clearInterval(preparingTimer); preparingTimer = null; }
+            }
+
+            if (isUpload) {
+                // A folder-drop upload has no server-side counterpart to the
+                // iRODS stage-in's progress endpoint - the only thing this page
+                // can observe is the browser's own upload progress, which is
+                // what onUploadProgress below reports as the bytes actually
+                // leave the tab. Once that hits 100%, control passes to the
+                // same "preparing" hints the iRODS path shows (see below): the
+                // request is still in flight either way, just for a different
+                // reason server-side.
+                uploadProgress.style.display = 'block';
+                uploadProgressFill.style.width = '0%';
+                uploadProgressText.textContent = 'Uploading: 0 / ' + formatBytes(uploadBytesTotal);
+            } else {
+                // iRODS path: the form posted here is just a stage_id, so
+                // there's no meaningful upload phase to show - go straight to
+                // the "preparing" hints for the wait that's actually happening
+                // (series matching / NIfTI conversion / tool image pull).
+                preparingTimer = startPreparingHints(submitStageText);
+            }
+
+            postFormWithProgress('/batch/submit', fd, isUpload ? function (loaded, total) {
+                var pct = total ? Math.round((loaded / total) * 100) : 0;
+                var msg = 'Uploading: ' + formatBytes(loaded) + ' / ' + formatBytes(total) + ' (' + pct + '%)';
+                uploadProgressFill.style.width = pct + '%';
+                uploadProgressText.textContent = msg;
+                submitStageText.textContent = msg;
+                if (pct >= 100 && !preparingTimer) {
+                    preparingTimer = startPreparingHints(submitStageText);
+                }
+            } : null)
+                .then(function (result) {
+                    stopPreparingHints();
+                    resetSubmitBtn();
+                    irodsStageProgress.style.display = 'none';
+                    if (!result.ok) {
+                        submitError.textContent = result.data.error || 'Failed to start batch job.';
+                        return;
+                    }
+                    // Build this job's card immediately from what we already know
+                    // client-side (the tools/modes chosen), rather than waiting on
+                    // a round trip to /batch/my_jobs -- that endpoint will pick the
+                    // same job up on its next refresh (ensureJobCard is a no-op for
+                    // a job_id it already has a card for) and reconcile with the
+                    // server's own params, but the user shouldn't have to wait for
+                    // that just to see the job they just started.
+                    // Mirrors the API's entry_id scheme (routes.py's
+                    // _validate_tool_entries: f"{tool}__{mode}") so the same
+                    // tool can appear more than once under different modes
+                    // without one entry clobbering another. This client-side
+                    // guess only has to survive until the next /batch/my_jobs
+                    // refresh reconciles it with the server's own params, so
+                    // it doesn't strictly need to match byte-for-byte -- but
+                    // keeping it in sync avoids a confusing key mismatch in
+                    // the meantime.
+                    var params = { tools: {} };
+                    tools.forEach(function (t) { params.tools[t.tool + '__' + t.mode] = { tool: t.tool, mode: t.mode }; });
+                    var card = openJob(result.data.job_id, 'batch', params, Date.now() / 1000, 'pending');
+                    card.root.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                })
+                .catch(function (err) { fail('Failed to start batch job: ' + err); });
+        }
+
+        if (inputSource !== 'irods') {
+            startJob(null);
+            return;
+        }
+
+        // iRODS input: stage in the background first, with a real progress
+        // bar, before starting the batch job (see batch.py's stage_irods()).
+        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Staging&hellip;';
+        irodsStageProgress.style.display = 'block';
+        irodsStageFill.style.width = '0%';
+        irodsStageText.textContent = 'Listing files in iRODS…';
+        submitStageText.textContent = 'Listing files in iRODS…';
+
+        var stageFd = new FormData();
+        stageFd.append('irods_input_path', irodsInputPath);
+        // The stage-in only downloads the series the selected tools
+        // actually open (batch.py's _plan_needed_series -> the API's
+        // /batch/plan), so it needs the tool choices, not just the folder.
+        stageFd.append('tools', JSON.stringify(tools));
+        fetch('/batch/stage_irods', { method: 'POST', body: stageFd })
+            .then(readJson)
+            .then(function (result) {
+                if (!result.ok) { fail(result.data.error || 'Failed to stage from iRODS.'); return; }
+                pollStageStatus(result.data.stage_id, function () { startJob(result.data.stage_id); }, fail);
+            })
+            .catch(function (err) { fail('Failed to stage from iRODS: ' + err); });
+    });
+
+    // ---------- Your Batch Jobs: list + per-job polling cards ----------
+    var TOOL_LABEL_BY_ID = {};
+    ({{ tools|tojson }}).forEach(function (t) { TOOL_LABEL_BY_ID[t.id] = t.label; });
+
+    var jobsList = document.getElementById('jobs-list');
+    var jobsEmpty = document.getElementById('jobs-empty');
+    var jobCardTemplate = document.getElementById('job-card-template');
+    var clearJobsBtn = document.getElementById('clear-jobs-btn');
+    var jobCards = {}; // job_id -> { root, els, polling }
+
+    function jobLabel(kind, params) {
+        // A job's params.tools is {entry_id: {tool, mode}}, one entry per
+        // selected (tool, mode) pair -- the same tool can appear under
+        // several entry_ids (e.g. two BraTS algorithms run in one job), so
+        // this groups by tool and lists every mode it ran with, rather than
+        // repeating the tool name once per entry.
+        var toolsParam = params && params.tools;
+        if (toolsParam && typeof toolsParam === 'object' && Object.keys(toolsParam).length) {
+            var modesByTool = {};
+            var toolOrder = [];
+            Object.keys(toolsParam).forEach(function (entryId) {
+                var entry = toolsParam[entryId] || {};
+                var toolId = entry.tool || entryId;
+                if (!modesByTool[toolId]) { modesByTool[toolId] = []; toolOrder.push(toolId); }
+                if (entry.mode) modesByTool[toolId].push(entry.mode);
+            });
+            return toolOrder.map(function (toolId) {
+                var toolLabel = TOOL_LABEL_BY_ID[toolId] || toolId;
+                var modes = modesByTool[toolId];
+                return modes.length ? toolLabel + ' (' + modes.join(', ') + ')' : toolLabel;
+            }).join(', ');
+        }
+        // Fallback for a job started before multi-tool batches, whose kind carried the
+        // single tool it ran (kind='batch_<tool>').
+        var toolId = (kind || '').replace(/^batch_/, '');
+        var toolLabel = TOOL_LABEL_BY_ID[toolId] || toolId || 'Batch';
+        var sub = params && (params.mode || params.task_name || params.segmenter_name);
+        return sub ? toolLabel + ' — ' + sub : toolLabel;
+    }
+
+    function formatTimestamp(unixSeconds) {
+        if (!unixSeconds) return '';
+        try { return 'started ' + new Date(unixSeconds * 1000).toLocaleString(); } catch (e) { return ''; }
+    }
+
+    // 'done'/'stopped' freeze the duration at updated_at (the timestamp of
+    // that final transition, see get_batch_job_status's docstring on the API
+    // side); every other status is still accumulating wall-clock time,
+    // including while paused -- pausing doesn't stop the clock, it only
+    // stops new cases from starting, so "how long the job took in total"
+    // for a job that sat paused for an hour honestly includes that hour.
+    var TERMINAL_JOB_STATUSES = { done: true, stopped: true };
+
+    function formatDuration(totalSeconds) {
+        var s = Math.max(0, Math.round(totalSeconds));
+        var h = Math.floor(s / 3600);
+        var m = Math.floor((s % 3600) / 60);
+        var sec = s % 60;
+        if (h > 0) return h + 'h ' + String(m).padStart(2, '0') + 'm';
+        if (m > 0) return m + 'm ' + String(sec).padStart(2, '0') + 's';
+        return sec + 's';
+    }
+
+    function renderJobDuration(els, status) {
+        if (!status.created_at) { els.duration.textContent = ''; return; }
+        var isTerminal = !!TERMINAL_JOB_STATUSES[status.status];
+        var endSeconds = isTerminal && status.updated_at ? status.updated_at : (Date.now() / 1000);
+        var duration = formatDuration(endSeconds - status.created_at);
+        els.duration.textContent = (isTerminal ? 'took ' : 'elapsed ') + duration;
+    }
+
+    // Which of the pause/resume/stop icon buttons make sense for a job's
+    // current status (see batch_jobs.py's pause_job/resume_job/stop_job on
+    // the API side for the exact state machine) -- 'pausing'/'stopping' hide
+    // the button whose action was already requested (clicking it again would
+    // just 409) but keep offering the other one, since a pausing job can
+    // still be stopped outright and a stopping job has nothing left to pause.
+    var JOB_CONTROLS_BY_STATUS = {
+        // 'pending' can't be paused yet (batch_jobs.pause_job only accepts a
+        // job that's actually 'running'), only stopped outright -- but it's
+        // a window of milliseconds before _drive_job flips it to 'running',
+        // so this is mostly theoretical.
+        pending:  { pause: false, resume: false, stop: true,  deletable: false },
+        running:  { pause: true,  resume: false, stop: true,  deletable: false },
+        pausing:  { pause: false, resume: false, stop: true,  deletable: false },
+        paused:   { pause: false, resume: true,  stop: true,  deletable: true },
+        stopping: { pause: false, resume: false, stop: false, deletable: false },
+        stopped:  { pause: false, resume: false, stop: false, deletable: true },
+        done:     { pause: false, resume: false, stop: false, deletable: true },
+    };
+
+    function renderJobControls(els, status) {
+        var controls = JOB_CONTROLS_BY_STATUS[status.status] || JOB_CONTROLS_BY_STATUS.done;
+        // postJobAction disables every control button while its request is
+        // in flight (see below) so a slow round trip can't be double-
+        // clicked; this is what undoes that once a fresh status comes back
+        // -- .disabled must be reset here for every button, not just
+        // display, or a button disabled mid-action (e.g. resume/stop while
+        // a pause request was in flight) would stay disabled forever.
+        els.pauseBtn.style.display = controls.pause ? 'inline-flex' : 'none';
+        els.pauseBtn.disabled = false;
+        els.resumeBtn.style.display = controls.resume ? 'inline-flex' : 'none';
+        els.resumeBtn.disabled = false;
+        els.stopBtn.style.display = controls.stop ? 'inline-flex' : 'none';
+        els.stopBtn.disabled = false;
+        els.deleteBtn.disabled = !controls.deletable;
+        els.deleteBtn.title = controls.deletable
+            ? 'Delete this job from history'
+            : 'Stop this job before deleting it';
+
+        // Once a job is 'paused'/'stopped'/'done' the result-actions panel
+        // below already offers this same ZIP (see renderJobStatus), so this
+        // icon-button peek is only useful while a job is still actively
+        // working through its cases -- and only once at least one of them
+        // actually has -- otherwise it would just 409.
+        var resultsPanelShown = status.status === 'paused' || status.status === 'stopped' || status.status === 'done';
+        var hasFinishedCase = (status.completed + (status.partial || 0) + status.failed) > 0;
+        els.downloadPartialBtn.style.display = (!resultsPanelShown && hasFinishedCase) ? 'inline-flex' : 'none';
+
+        if (status.status === 'done' || status.status === 'pending' || status.status === 'running') {
+            els.statusBadge.style.display = 'none';
+        } else {
+            els.statusBadge.style.display = 'inline-block';
+            els.statusBadge.className = 'badge job-status-badge ' + status.status;
+            els.statusBadge.textContent = status.status;
+        }
+    }
+
+    // Empty-state hint and "Clear history" button both just track whether
+    // any job card currently exists in the DOM - recomputed after every
+    // card is added or removed, rather than tracked as a separate flag that
+    // could drift out of sync with jobCards.
+    function updateJobsChrome() {
+        var hasJobs = Object.keys(jobCards).length > 0;
+        jobsEmpty.style.display = hasJobs ? 'none' : 'block';
+        clearJobsBtn.style.display = hasJobs ? 'inline-flex' : 'none';
+    }
+
+    function removeJobCard(jobId) {
+        var card = jobCards[jobId];
+        if (!card) return;
+        card.root.remove();
+        delete jobCards[jobId];
+        updateJobsChrome();
+    }
+
+    function ensureJobCard(jobId, kind, params, createdAt) {
+        if (jobCards[jobId]) return jobCards[jobId];
+
+        var frag = jobCardTemplate.content.cloneNode(true);
+        var root = frag.querySelector('.job-card');
+        var els = {
+            label: root.querySelector('.job-label'),
+            id: root.querySelector('.job-id'),
+            submitted: root.querySelector('.job-submitted'),
+            duration: root.querySelector('.job-duration'),
+            statusBadge: root.querySelector('.job-status-badge'),
+            downloadPartialBtn: root.querySelector('.download-partial-btn'),
+            pauseBtn: root.querySelector('.pause-job-btn'),
+            resumeBtn: root.querySelector('.resume-job-btn'),
+            stopBtn: root.querySelector('.stop-job-btn'),
+            deleteBtn: root.querySelector('.delete-job-btn'),
+            pending: root.querySelector('.stat-pending'),
+            running: root.querySelector('.stat-running'),
+            done: root.querySelector('.stat-done'),
+            partial: root.querySelector('.stat-partial'),
+            failed: root.querySelector('.stat-failed'),
+            stopped: root.querySelector('.stat-stopped'),
+            stoppedStat: root.querySelector('.progress-stat.stopped'),
+            fillDone: root.querySelector('.fill-done'),
+            fillPartial: root.querySelector('.fill-partial'),
+            fillFailed: root.querySelector('.fill-failed'),
+            fillStopped: root.querySelector('.fill-stopped'),
+            caseBody: root.querySelector('.case-table-body'),
+            resultActions: root.querySelector('.result-actions'),
+            preliminaryNote: root.querySelector('.preliminary-note'),
+            downloadLink: root.querySelector('.download-zip-link'),
+            jobIrodsPath: root.querySelector('.job-irods-path'),
+            jobIrodsBrowseBtn: root.querySelector('.job-irods-browse-btn'),
+            pushBtn: root.querySelector('.push-irods-btn'),
+            pushMsg: root.querySelector('.push-result-msg'),
+        };
+        els.label.textContent = jobLabel(kind, params);
+        els.id.textContent = jobId;
+        els.submitted.textContent = formatTimestamp(createdAt);
+        // Fixed for this card's whole lifetime (only the job id feeds it),
+        // unlike the full download-zip-link below, which is only valid once
+        // the job settles and so gets its href set on every status render.
+        els.downloadPartialBtn.href = API_BASE + '/batch/result/' + jobId + '/partial';
+        {% if is_admin %}
+        // Admins only: straight to this job's log on the Job Logs page.
+        var logsLink = document.createElement('a');
+        logsLink.className = 'icon-btn';
+        logsLink.title = 'View this job\'s log (admin)';
+        logsLink.href = {{ url_for('job_logs.index') | tojson }} + 'view/batch/' + encodeURIComponent(jobId) + '/job.log'
+            + {{ ('?embedded=1' if request.args.get('embedded') else '') | tojson }};
+        logsLink.innerHTML = '<i class="fa-solid fa-file-lines"></i>';
+        els.downloadPartialBtn.parentNode.insertBefore(logsLink, els.downloadPartialBtn);
+        {% endif %}
+
+        var card = { root: root, els: els, polling: false };
+
+        els.deleteBtn.addEventListener('click', function () {
+            if (!confirm('Delete this job from history? Its stored result (ZIP/iRODS output) will be gone for good.')) return;
+            els.deleteBtn.disabled = true;
+            fetch('/batch/job/' + jobId, { method: 'DELETE' })
+                .then(readJson)
+                .then(function (result) {
+                    if (!result.ok) {
+                        els.deleteBtn.disabled = false;
+                        alert(result.data.error || 'Could not delete this job.');
+                        return;
+                    }
+                    removeJobCard(jobId);
+                })
+                .catch(function (err) {
+                    els.deleteBtn.disabled = false;
+                    alert('Failed to delete this job: ' + err);
+                });
+        });
+
+        // Pause/resume/stop share one pattern: disable every control button
+        // while the request is in flight (so a slow round trip can't be
+        // double-clicked into two overlapping requests), POST to this job's
+        // action, then re-poll right away for snappy feedback instead of
+        // waiting for pollJobStatus's own next scheduled tick (up to 4s).
+        // Stop asks for confirmation, same as delete above, since an
+        // in-flight case is not interrupted -- only queued-but-unstarted
+        // ones are affected (see batch_jobs.stop_job's docstring on the API
+        // side) -- but the job itself won't run any further after this.
+        function postJobAction(action, confirmMessage) {
+            if (confirmMessage && !confirm(confirmMessage)) return;
+            [els.pauseBtn, els.resumeBtn, els.stopBtn, els.deleteBtn].forEach(function (b) { b.disabled = true; });
+            fetch('/batch/job/' + jobId + '/' + action, { method: 'POST' })
+                .then(readJson)
+                .then(function (result) {
+                    if (!result.ok) alert(result.data.error || ('Could not ' + action + ' this job.'));
+                    pollJobStatus(jobId);
+                })
+                .catch(function (err) {
+                    alert('Failed to ' + action + ' this job: ' + err);
+                    renderJobControls(els, { status: card.lastStatus || 'running' });
+                });
+        }
+
+        els.pauseBtn.addEventListener('click', function () { postJobAction('pause'); });
+        els.resumeBtn.addEventListener('click', function () { postJobAction('resume'); });
+        els.stopBtn.addEventListener('click', function () {
+            postJobAction('stop', 'Stop this job? Cases already running will finish, but no further cases will start. This cannot be undone.');
+        });
+
+        // Every finished job offers both a ZIP download and a push-to-iRODS
+        // action side by side (no upfront choice between the two - either
+        // one needs a manual click to confirm anyway), so each job card
+        // carries its own iRODS destination picker rather than one chosen
+        // at submit time.
+        els.jobIrodsBrowseBtn.addEventListener('click', function () {
+            openPicker(els.jobIrodsPath);
+        });
+
+        els.pushBtn.addEventListener('click', function () {
+            var dest = els.jobIrodsPath.value;
+            if (!dest) {
+                els.pushMsg.className = 'push-result-msg error';
+                els.pushMsg.textContent = 'Choose an iRODS destination folder first.';
+                return;
+            }
+            els.pushMsg.className = 'push-result-msg';
+            els.pushMsg.textContent = 'Pushing to iRODS…';
+            var fd = new FormData();
+            fd.append('irods_output_path', dest);
+            fetch('/batch/push_to_irods/' + jobId, { method: 'POST', body: fd })
+                .then(readJson)
+                .then(function (result) {
+                    els.pushMsg.className = 'push-result-msg ' + (result.ok && !result.data.failed ? 'success' : 'error');
+                    els.pushMsg.textContent = result.data.message || result.data.error || 'Done.';
+                })
+                .catch(function (err) {
+                    els.pushMsg.className = 'push-result-msg error';
+                    els.pushMsg.textContent = 'Failed to push to iRODS: ' + err;
+                });
+        });
+
+        // Newest job goes first; only newly-created cards get positioned
+        // here, so an already-known job (see ensureJobCard's early return
+        // above) never jumps around in the list on a later refresh.
+        jobsList.insertBefore(root, jobsList.firstChild);
+        jobCards[jobId] = card;
+        updateJobsChrome();
+        return card;
+    }
+
+    function renderJobStatus(card, status) {
+        var els = card.els;
+        card.lastStatus = status.status;
+        renderJobControls(els, status);
+        renderJobDuration(els, status);
+        els.pending.textContent = status.pending;
+        els.running.textContent = status.running;
+        els.done.textContent = status.completed;
+        els.partial.textContent = status.partial || 0;
+        els.failed.textContent = status.failed;
+        // Hidden until a job actually has a stopped case -- unlike
+        // partial/failed, "stopped" only ever applies after someone clicks
+        // Stop, so showing it (at 0) on every ordinary job would just be
+        // clutter.
+        els.stoppedStat.style.display = status.stopped ? '' : 'none';
+        els.stopped.textContent = status.stopped || 0;
+
+        var total = status.total || 1;
+        els.fillDone.style.width = Math.round((status.completed / total) * 100) + '%';
+        els.fillPartial.style.width = Math.round(((status.partial || 0) / total) * 100) + '%';
+        els.fillFailed.style.width = Math.round((status.failed / total) * 100) + '%';
+        els.fillStopped.style.width = Math.round(((status.stopped || 0) / total) * 100) + '%';
+
+        els.caseBody.innerHTML = '';
+        (status.per_case || []).forEach(function (c) {
+            var tr = document.createElement('tr');
+
+            var idCell = document.createElement('td');
+            idCell.textContent = c.id;
+
+            var statusCell = document.createElement('td');
+            var badge = document.createElement('span');
+            badge.className = 'badge ' + c.status;
+            badge.textContent = c.status;
+            statusCell.appendChild(badge);
+
+            // Third column shows this case's per-tool breakdown when the job
+            // ran more than one (tool, mode) entry (or the one entry ran
+            // into trouble) -- c.tools is {entry_id: {tool, mode, status,
+            // error, output_files}} (entry_id, not just tool, is
+            // the unique key, since the same tool can run several modes --
+            // e.g. several BraTS algorithms -- in one job). Falls back to
+            // the case-level error for a job predating that per-tool detail.
+            var toolsCell = document.createElement('td');
+            var entryIds = c.tools ? Object.keys(c.tools) : [];
+            if (entryIds.length) {
+                var list = document.createElement('div');
+                list.className = 'tool-status-list';
+                entryIds.forEach(function (entryId) {
+                    var t = c.tools[entryId];
+                    var row = document.createElement('div');
+                    row.className = 'tool-status-row';
+
+                    var name = document.createElement('span');
+                    name.className = 'tool-status-name';
+                    var toolLabel = TOOL_LABEL_BY_ID[t.tool] || t.tool || entryId;
+                    name.textContent = t.mode ? toolLabel + ' (' + t.mode + ')' : toolLabel;
+                    row.appendChild(name);
+
+                    var toolBadge = document.createElement('span');
+                    toolBadge.className = 'badge ' + t.status;
+                    toolBadge.textContent = t.status;
+                    row.appendChild(toolBadge);
+
+                    if (t.error) {
+                        var errSpan = document.createElement('span');
+                        errSpan.className = 'case-error';
+                        errSpan.textContent = t.error;
+                        row.appendChild(errSpan);
+                    }
+                    list.appendChild(row);
+                });
+                toolsCell.appendChild(list);
+            } else if (c.error) {
+                var caseErrSpan = document.createElement('span');
+                caseErrSpan.className = 'case-error';
+                caseErrSpan.textContent = c.error;
+                toolsCell.appendChild(caseErrSpan);
+            } else {
+                toolsCell.textContent = '—';
+            }
+
+            tr.appendChild(idCell);
+            tr.appendChild(statusCell);
+            tr.appendChild(toolsCell);
+            els.caseBody.appendChild(tr);
+        });
+
+        // 'paused'/'stopped' can still download/push whatever cases finished
+        // before the job stopped (batch_result_route on the API side serves
+        // those statuses too) -- flagged as preliminary since it's not the
+        // full cohort. A resumed job goes back to 'running' and hides this
+        // again until it resettles, so a stale link/note from before the
+        // resume doesn't linger.
+        if (status.status === 'done' || status.status === 'paused' || status.status === 'stopped') {
+            els.resultActions.style.display = 'flex';
+            els.preliminaryNote.style.display = status.status === 'done' ? 'none' : 'block';
+            els.downloadLink.href = API_BASE + '/batch/result/' + status.job_id;
+        } else {
+            els.resultActions.style.display = 'none';
+        }
+    }
+
+    // Direct browser -> batch API polling, same as before this feature (see
+    // this page's Python-side docstring): only /batch/my_jobs itself needs
+    // to go through the GUI backend, since only it needs to know who's
+    // logged in. A job_id, once known to this page, is polled the same way
+    // regardless of how it was discovered (just-submitted or restored from
+    // the list).
+    function pollJobStatus(jobId) {
+        var card = jobCards[jobId];
+        if (!card) return;
+        fetch(API_BASE + '/batch/status/' + jobId)
+            .then(function (resp) { return resp.json(); })
+            .then(function (status) {
+                renderJobStatus(card, status);
+                if (status.status !== 'done') {
+                    setTimeout(function () { pollJobStatus(jobId); }, 4000);
+                }
+            })
+            .catch(function () {
+                // transient network hiccup -- keep retrying rather than giving
+                // up on a job that might still be running for hours.
+                setTimeout(function () { pollJobStatus(jobId); }, 4000);
+            });
+    }
+
+    function openJob(jobId, kind, params, createdAt, status) {
+        var isNew = !jobCards[jobId];
+        var card = ensureJobCard(jobId, kind, params, createdAt);
+        if (isNew) {
+            card.polling = true;
+            pollJobStatus(jobId); // one fetch now; keeps rescheduling itself until 'done'
+        }
+        return card;
+    }
+
+    function loadMyJobs() {
+        fetch('/batch/my_jobs')
+            .then(function (resp) { return resp.json(); })
+            .then(function (data) {
+                var jobs = data.jobs || [];
+                // The API already returns newest-first; ensureJobCard prepends
+                // each newly-created card, so walk oldest-to-newest here to end
+                // up with the same newest-first DOM order.
+                jobs.slice().reverse().forEach(function (j) {
+                    openJob(j.job_id, j.kind, j.params, j.created_at, j.status);
+                });
+                updateJobsChrome();
+            })
+            .catch(function () { /* transient - the next periodic refresh retries */ });
+    }
+
+    clearJobsBtn.addEventListener('click', function () {
+        if (!confirm('Clear all finished jobs from history? Any still running are left alone.')) return;
+        clearJobsBtn.disabled = true;
+        fetch('/batch/jobs', { method: 'DELETE' })
+            .then(readJson)
+            .then(function (result) {
+                clearJobsBtn.disabled = false;
+                if (!result.ok) {
+                    alert(result.data.error || 'Could not clear job history.');
+                    return;
+                }
+                (result.data.deleted || []).forEach(removeJobCard);
+                if ((result.data.skipped || []).length) {
+                    alert(result.data.skipped.length + ' job(s) are still running and were left in history.');
+                }
+            })
+            .catch(function (err) {
+                clearJobsBtn.disabled = false;
+                alert('Failed to clear job history: ' + err);
+            });
+    });
+
+    loadMyJobs();
+    setInterval(loadMyJobs, 30000);
+})();
+</script>
+{% endblock %}

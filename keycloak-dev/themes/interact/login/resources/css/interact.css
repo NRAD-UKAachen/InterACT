@@ -1,0 +1,532 @@
+/* InterACT login theme -- overrides on top of the stock keycloak login.css.
+ *
+ * Design is taken straight from the GUI shell (docker-context-gui,
+ * app/templates/base.html): near-black page, #262626 cards, RWTH green
+ * accent, white sans-serif text, 10-12px corner radii. Anything a user sees
+ * between clicking "Login" in the GUI and landing back in it should look
+ * like the same application.
+ *
+ * Only shared classes are targeted, so every other flow Keycloak renders
+ * (forgot password, update password, verify email, OTP) inherits the same
+ * look without extra work. */
+
+:root {
+  --interact-green: #669900;
+  --interact-green-dark: #567f00;
+  --interact-green-light: #a3c644;
+  --interact-page-bg: #0a0a0a;
+  --interact-card-bg: #262626;
+  --interact-field-bg: #1b1b1b;
+  --interact-border: #3a3a3a;
+  --interact-text: #ffffff;
+  --interact-muted: #999999;
+}
+
+/* ---------------------------------------------------------------- page -- */
+
+/* PatternFly puts bg-login.jpg on .login-pf and the parent theme puts
+   keycloak-bg.png on the body; both have to go. The green wash top-left is
+   where the GUI's green sidebar sits, so the two pages read as one app. */
+.login-pf {
+  background: none;
+}
+
+.login-pf body,
+.login-pf-page {
+  background: radial-gradient(1100px 640px at 12% -10%, rgba(102, 153, 0, 0.22), transparent 62%),
+              var(--interact-page-bg);
+  background-attachment: fixed;
+  color: var(--interact-text);
+  font-family: sans-serif;
+}
+
+/* The parent theme swaps the body to solid white on phones. */
+@media (max-width: 767px) {
+  .login-pf body {
+    background: radial-gradient(700px 420px at 12% -10%, rgba(102, 153, 0, 0.22), transparent 62%),
+                var(--interact-page-bg);
+  }
+}
+
+/* -------------------------------------------------------------- header -- */
+
+#kc-header {
+  color: var(--interact-text);
+}
+
+/* Brand lockup: green gradient icon badge + "InterACT" wordmark, same as
+   .page-header .icon-badge in base.html. The wordmark is only injected when
+   the realm has no HTML display name of its own (Realm settings -> General
+   -> HTML Display name), so setting one later replaces it instead of
+   doubling up. */
+#kc-header-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 56px 10px 24px;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-transform: none;
+  color: var(--interact-text);
+}
+
+#kc-header-wrapper::before {
+  content: "";
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background-color: var(--interact-green);
+  /* Lock glyph first: the earlier layer is painted on top of the gradient. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='11' width='18' height='11' rx='2'/%3E%3Cpath d='M7 11V7a5 5 0 0 1 10 0v4'/%3E%3C/svg%3E"),
+                    linear-gradient(135deg, var(--interact-green), var(--interact-green-dark));
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 20px 20px, cover;
+  box-shadow: 0 4px 14px rgba(102, 153, 0, 0.35);
+}
+
+#kc-header-wrapper:empty::after {
+  content: "InterACT";
+}
+
+/* ---------------------------------------------------------------- card -- */
+
+.login-pf-page .card-pf {
+  background: var(--interact-card-bg);
+  color: var(--interact-text);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 3px solid var(--interact-green);
+  border-radius: 12px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.55);
+  padding: 8px 28px 24px;
+  max-width: 460px;
+}
+
+@media (max-width: 767px) {
+  .login-pf-page .card-pf {
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    border-top: 3px solid var(--interact-green);
+    padding: 8px 20px 20px;
+  }
+}
+
+.login-pf-page .login-pf-header h1,
+#kc-page-title {
+  color: var(--interact-text);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+#kc-attempted-username {
+  color: var(--interact-text);
+}
+
+#kc-username a,
+#kc-username .kc-login-tooltip i {
+  color: var(--interact-muted);
+}
+
+/* --------------------------------------------------------------- form -- */
+
+.pf-c-form__label,
+.pf-c-form__label-text,
+.login-pf-page label,
+.login-pf-page .checkbox label {
+  color: var(--interact-text);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* PatternFly 4 drives the inputs off custom properties; the older PF3
+   sheet is loaded too, so the concrete declarations below back them up. */
+.pf-c-form-control,
+.login-pf-page input[type="text"],
+.login-pf-page input[type="email"],
+.login-pf-page input[type="password"] {
+  --pf-c-form-control--BackgroundColor: var(--interact-field-bg);
+  --pf-c-form-control--Color: var(--interact-text);
+  --pf-c-form-control--BorderTopColor: var(--interact-border);
+  --pf-c-form-control--BorderRightColor: var(--interact-border);
+  --pf-c-form-control--BorderBottomColor: var(--interact-border);
+  --pf-c-form-control--BorderLeftColor: var(--interact-border);
+  --pf-c-form-control--hover--BorderBottomColor: var(--interact-green);
+  --pf-c-form-control--focus--BorderBottomColor: var(--interact-green);
+  background-color: var(--interact-field-bg);
+  color: var(--interact-text);
+  border: 1px solid var(--interact-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  height: auto;
+  box-shadow: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pf-c-form-control:hover {
+  border-color: #4c4c4c;
+}
+
+.pf-c-form-control:focus,
+.login-pf-page input[type="text"]:focus,
+.login-pf-page input[type="email"]:focus,
+.login-pf-page input[type="password"]:focus {
+  border-color: var(--interact-green);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(102, 153, 0, 0.28);
+}
+
+.pf-c-form-control::placeholder {
+  color: #6a6a6a;
+}
+
+/* Autofilled fields.
+ *
+ * Chrome paints its own pale highlight (#e8f0fe) over the field and it
+ * outlives a plain background-color override -- with our white text on top
+ * that left the credentials unreadable. Three mechanisms are stacked to
+ * beat it:
+ *   1. the oversized inset shadow repaints the field's interior,
+ *   2. the ~7-day transition delay means Chrome never gets to animate its
+ *      highlight in (it applies the colour via a transition),
+ *   3. filter: none is how Firefox tints autofilled fields.
+ *
+ * The :-webkit-autofill and :autofill rules are kept separate on purpose: a
+ * browser drops an entire rule if any one selector in its list is
+ * unrecognised, so pairing the two would lose both wherever only one is
+ * supported. */
+.pf-c-form-control:-webkit-autofill,
+.pf-c-form-control:-webkit-autofill:hover,
+.pf-c-form-control:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--interact-text) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--interact-field-bg) inset !important;
+  box-shadow: 0 0 0 1000px var(--interact-field-bg) inset !important;
+  background-color: var(--interact-field-bg) !important;
+  background-image: none !important;
+  caret-color: var(--interact-text);
+  transition: background-color 0s 600000s, color 0s 600000s,
+              border-color 0.15s ease;
+}
+
+/* Same, but keeping the green focus ring alongside the repaint shadow. */
+.pf-c-form-control:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--interact-text) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--interact-field-bg) inset,
+                      0 0 0 3px rgba(102, 153, 0, 0.28) !important;
+  box-shadow: 0 0 0 1000px var(--interact-field-bg) inset,
+              0 0 0 3px rgba(102, 153, 0, 0.28) !important;
+  background-color: var(--interact-field-bg) !important;
+  background-image: none !important;
+  caret-color: var(--interact-text);
+  transition: background-color 0s 600000s, color 0s 600000s,
+              border-color 0.15s ease;
+}
+
+.pf-c-form-control:autofill,
+.pf-c-form-control:autofill:hover,
+.pf-c-form-control:autofill:active {
+  -webkit-text-fill-color: var(--interact-text) !important;
+  color: var(--interact-text) !important;
+  box-shadow: 0 0 0 1000px var(--interact-field-bg) inset !important;
+  background-color: var(--interact-field-bg) !important;
+  background-image: none !important;
+  filter: none !important;
+  caret-color: var(--interact-text);
+  transition: background-color 0s 600000s, color 0s 600000s,
+              border-color 0.15s ease;
+}
+
+.pf-c-form-control:autofill:focus {
+  -webkit-text-fill-color: var(--interact-text) !important;
+  color: var(--interact-text) !important;
+  box-shadow: 0 0 0 1000px var(--interact-field-bg) inset,
+              0 0 0 3px rgba(102, 153, 0, 0.28) !important;
+  background-color: var(--interact-field-bg) !important;
+  background-image: none !important;
+  filter: none !important;
+  caret-color: var(--interact-text);
+  transition: background-color 0s 600000s, color 0s 600000s,
+              border-color 0.15s ease;
+}
+
+/* Show/hide password toggle sitting inside the input group. */
+.pf-c-input-group {
+  --pf-c-input-group--BackgroundColor: transparent;
+  background: transparent;
+}
+
+.pf-c-input-group .pf-c-form-control {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: 0;
+}
+
+.pf-c-input-group .pf-c-button.pf-m-control {
+  background: var(--interact-field-bg);
+  color: var(--interact-muted);
+  border: 1px solid var(--interact-border);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+}
+
+.pf-c-input-group .pf-c-button.pf-m-control::before {
+  border: 0;
+}
+
+.pf-c-input-group .pf-c-button.pf-m-control:hover {
+  color: var(--interact-text);
+}
+
+/* Primary action: the GUI's green button, incl. its hover shade. */
+.login-pf-page .btn-primary,
+.pf-c-button.pf-m-primary,
+#kc-login {
+  --pf-c-button--m-primary--BackgroundColor: var(--interact-green);
+  --pf-c-button--m-primary--hover--BackgroundColor: var(--interact-green-dark);
+  --pf-c-button--m-primary--focus--BackgroundColor: var(--interact-green-dark);
+  --pf-c-button--m-primary--active--BackgroundColor: var(--interact-green-dark);
+  background-color: var(--interact-green);
+  border: none;
+  border-radius: 10px;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 12px 16px;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.login-pf-page .btn-primary:hover,
+.pf-c-button.pf-m-primary:hover,
+#kc-login:hover {
+  background-color: var(--interact-green-dark);
+  box-shadow: 0 4px 14px rgba(102, 153, 0, 0.35);
+}
+
+.pf-c-button.pf-m-primary:focus-visible,
+#kc-login:focus-visible {
+  outline: 2px solid var(--interact-green-light);
+  outline-offset: 2px;
+}
+
+/* Secondary buttons (e.g. "Cancel" / "Back" on the reset-password flows). */
+.pf-c-button.pf-m-secondary,
+.login-pf-page .btn-default {
+  background: transparent;
+  color: var(--interact-text);
+  border: 1px solid var(--interact-border);
+  border-radius: 10px;
+}
+
+.pf-c-button.pf-m-secondary:hover,
+.login-pf-page .btn-default:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: #4c4c4c;
+  color: var(--interact-text);
+}
+
+/* Checkbox ("Remember me"). */
+.pf-c-check__input,
+.login-pf-page input[type="checkbox"] {
+  accent-color: var(--interact-green);
+}
+
+/* --------------------------------------------------------------- links -- */
+
+.login-pf-page a,
+#kc-form-options a,
+#kc-info a,
+#kc-registration a,
+#kc-registration-container a {
+  color: var(--interact-green-light);
+  text-decoration: none;
+}
+
+.login-pf-page a:hover,
+#kc-form-options a:hover,
+#kc-info a:hover,
+#kc-registration a:hover,
+#kc-registration-container a:hover {
+  color: #b9d96a;
+  text-decoration: underline;
+}
+
+.login-pf-page .login-pf-signup,
+#kc-registration span,
+#kc-info-wrapper {
+  color: var(--interact-muted);
+  font-size: 0.9rem;
+}
+
+/* -------------------------------------------------------------- alerts -- */
+
+/* Same palette as the GUI's .alert-danger/.alert-success/.alert-warning,
+   applied as a left rule on a dark tile rather than a solid fill so it sits
+   on the card without shouting. */
+.pf-c-alert {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 4px solid var(--interact-muted);
+  border-radius: 8px;
+  color: var(--interact-text);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.pf-c-alert__title,
+.kc-feedback-text {
+  color: var(--interact-text);
+  font-size: 0.9rem;
+}
+
+.pf-c-alert__icon {
+  color: var(--interact-muted);
+}
+
+.alert-error {
+  border-left-color: #e74c3c;
+}
+
+.alert-error .pf-c-alert__icon {
+  color: #e74c3c;
+}
+
+.alert-success {
+  border-left-color: #2ecc71;
+}
+
+.alert-success .pf-c-alert__icon {
+  color: #2ecc71;
+}
+
+.alert-warning {
+  border-left-color: #f39c12;
+}
+
+.alert-warning .pf-c-alert__icon {
+  color: #f39c12;
+}
+
+.alert-info {
+  border-left-color: #8ebae5;
+}
+
+.alert-info .pf-c-alert__icon {
+  color: #8ebae5;
+}
+
+/* Password-requirements hint list (login-update-password.ftl). Styled like
+   the .pf-c-alert tiles above -- a muted rule rather than a solid fill --
+   but left distinct since it's guidance, not a message from the server. */
+#kc-password-requirements {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 4px solid var(--interact-green);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+}
+
+#kc-password-requirements p {
+  color: var(--interact-text);
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+#kc-password-requirements ul {
+  color: var(--interact-muted);
+  margin: 0;
+  padding-left: 1.1em;
+}
+
+#kc-password-requirements li {
+  margin: 2px 0;
+}
+
+/* Per-field validation text under an input. */
+.pf-m-error,
+.pf-c-form__helper-text.pf-m-error,
+#input-error {
+  color: #ff8a7a;
+}
+
+.has-error .pf-c-form-control,
+.pf-c-form-control[aria-invalid="true"] {
+  border-color: #e74c3c;
+}
+
+/* ------------------------------------------- multi-factor / other flows -- */
+
+/* "Try another way" credential picker and the OTP tiles, so the MFA screens
+   don't fall back to white PatternFly boxes on the dark page. */
+.select-auth-box-parent {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  margin-bottom: 10px;
+  padding: 14px;
+}
+
+.select-auth-box-parent:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--interact-green);
+}
+
+.select-auth-box-headline,
+.select-auth-box-desc,
+.select-auth-box-icon,
+.select-auth-box-arrow {
+  color: var(--interact-text);
+}
+
+.select-auth-box-desc {
+  color: var(--interact-muted);
+}
+
+.pf-c-tile {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--interact-text);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Language switcher, when the realm enables i18n. */
+#kc-locale a,
+#kc-current-locale-link {
+  color: var(--interact-muted);
+  background: transparent;
+  border: none;
+}
+
+#kc-locale a:hover,
+#kc-current-locale-link:hover {
+  color: var(--interact-text);
+}
+
+.pf-c-dropdown__menu {
+  background: var(--interact-card-bg);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.pf-c-dropdown__menu-item {
+  background: transparent;
+  color: var(--interact-text);
+}
+
+.pf-c-dropdown__menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--interact-text);
+}
+
+/* Login lock countdown (resources/js/login-lock.js). */
+.interact-lock {
+  margin: 0.75rem 0;
+  font-weight: 600;
+  color: #c9190b;
+}

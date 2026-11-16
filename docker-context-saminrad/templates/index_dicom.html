@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interaktive Segmentierung medizinischer Bilddaten - Volumetrie</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style_dicom.css') }}">
+    <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
+</head>
+<body>
+    <h1>Interaktive Segmentierung medizinischer Bilddaten</h1>
+
+    <div id="main-view" class="main-container">
+        <div class="canvas-area">
+            <div class="progress-container hidden">
+                <div id="progress-label">Lädt...</div>
+                <progress id="progress-bar" max="100" value="0" title="Bearbeitungsfortschritt"></progress>
+            </div>
+
+            <div id="image-info">
+                <span id="filename">Lädt...</span>
+            </div>
+
+            <!-- Toggle-Buttons für Segmentierungsansicht -->
+            <div id="view-toggle-container" class="hidden">
+                <div class="view-toggle-buttons">
+                    <button id="btn-view-original" class="view-toggle-btn active" title="Originalaufnahme anzeigen">Original</button>
+                    <button id="btn-view-segmentation" class="view-toggle-btn disabled" title="Segmentierung anzeigen" disabled>Segmentierung</button>
+                </div>
+            </div>
+
+            <div id="canvas-container">
+                <canvas id="imageCanvas"></canvas>
+                <canvas id="previewCanvas"></canvas>
+                <div id="loading-spinner" class="spinner" style="display: none;"></div>
+                <div id="slice-slider-container" class="hidden">
+                    <label for="slice-slider">Slice: <span id="current-slice-display">1</span>/<span id="total-slices-display">?</span> (<span id="current-axis-display">Axial</span>)</label>
+                    <input type="range" id="slice-slider" min="0" value="0" step="1">
+                </div>
+            </div>
+
+            <!-- Toggle-Buttons für finale Ansicht (3D vs. 2D Overlay) -->
+            <div id="final-view-toggle-container" class="view-toggle-buttons hidden">
+                <button id="btn-final-view-3d" class="view-toggle-btn active" title="3D-Ansicht anzeigen">3D</button>
+                <button id="btn-final-view-2d" class="view-toggle-btn" title="2D-Overlay anzeigen">2D Overlay</button>
+            </div>
+
+            <div id="preview-area-container" class="hidden">
+                <div id="preview-3d-area" class="preview-box hidden">
+                    <h4>3D Masken-Ansicht:</h4>
+                    <div class="placeholder-text-3d" style="display: block;">3D Ansicht wird nach Erstellung geladen...</div>
+                    <canvas id="nifti-3d-viewer-canvas"></canvas>
+                </div>
+                <div id="final-2d-viewer-container" class="preview-box hidden" style="margin-top: 20px;">
+                    <h4>2D Overlay-Ansicht:</h4>
+                <div id="final-slice-slider-container" style="margin: 10px 0;">
+                    <label for="final-slice-slider">Slice: <span id="final-current-slice-display">1</span>/<span id="final-total-slices-display">?</span></label>
+                    <input type="range" id="final-slice-slider" min="0" value="0" step="1" style="width: 80%; margin: 0 auto; display: block;">
+                </div>
+                <div id="final-canvas-wrapper" style="margin: 0 auto; background-color: #000; border: 1px solid var(--border); border-radius: var(--radius-sm); display: flex; justify-content: center; align-items: center; max-height: 78vh;">
+                    <canvas id="final-overlay-canvas" style="max-width: 100%; max-height: 75vh; height: auto; display: block;"></canvas>
+                </div>
+                </div>
+                <div id="gt-legend" class="hidden">
+                    <span class="gt-legend-title">GT-Vergleich:</span>
+                    <span class="gt-legend-item"><span class="gt-legend-swatch gt-swatch-seg"></span>nur Segmentierung</span>
+                    <span class="gt-legend-item"><span class="gt-legend-swatch gt-swatch-gt"></span>nur Ground-Truth</span>
+                    <span class="gt-legend-item"><span class="gt-legend-swatch gt-swatch-overlap"></span>Überlappung</span>
+                </div>
+                <div id="finished-message" class="hidden"></div>
+            </div>
+        </div>
+
+        <div class="controls-sidebar">
+            <div id="workflow-stepper" class="workflow-stepper">
+                <div class="wf-step" data-step="1"><span class="wf-num">1</span>Fensterung</div>
+                <div class="wf-step" data-step="2"><span class="wf-num">2</span>Methode</div>
+                <div class="wf-step" data-step="3"><span class="wf-num">3</span>Annotation</div>
+                <div class="wf-step" data-step="4"><span class="wf-num">4</span>Ergebnis</div>
+            </div>
+            <div id="series-selector-container" class="in-sidebar hidden">
+                <label for="series-select">Serie:</label>
+                <select id="series-select" title="DICOM-Serie auswählen"></select>
+            </div>
+            <div id="axis-selector-container" class="controls-sub-section hidden">
+                <h4>Ansicht wählen:</h4>
+                <div class="controls axis-buttons">
+                    <button id="btn-axis-axial" data-axis="axial" class="axis-btn active" title="Axiale Ansicht">Axial</button>
+                    <button id="btn-axis-sagittal" data-axis="sagittal" class="axis-btn" title="Sagittale Ansicht">Sagittal</button>
+                    <button id="btn-axis-coronal" data-axis="coronal" class="axis-btn" title="Koronale Ansicht">Koronal</button>
+                </div>
+            </div>
+
+            <div id="controls-wl" class="controls-stage controls-stage-1">
+                <h2>Stufe 1: Fensterung</h2>
+                <a href="{{ url_for('main.index') }}" id="btn-back-to-upload" class="back-button" title="Zurück zum Upload (aktuelle Sitzung wird beendet)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-arrow-left-circle" viewBox="0 0 16 16">
+                        <path fill-rule="evenodd" d="M1 8a7 7 0 1 0 14 0A7 7 0 0 0 1 8zm15 0A8 8 0 1 1 0 8a8 8 0 0 1 16 0zm-4.5-.5a.5.5 0 0 1 0 1H5.707l2.147 2.146a.5.5 0 0 1-.708.708l-3-3a.5.5 0 0 1 0-.708l3-3a.5.5 0 1 1 .708.708L5.707 7.5H11.5z"/>
+                    </svg>
+                     Zurück zum Upload
+                </a>
+
+                <div class="json-upload-container">
+                    <label for="json-upload-input" class="action-button json-upload-label" title="Gespeicherte Segmentierungsparameter aus einer JSON-Datei laden">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-box-arrow-in-up" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M3.5 10a.5.5 0 0 1-.5-.5v-8a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 0 0 1h2A1.5 1.5 0 0 0 14 9.5v-8A1.5 1.5 0 0 0 12.5 0h-9A1.5 1.5 0 0 0 2 1.5v8A1.5 1.5 0 0 0 3.5 11h2a.5.5 0 0 0 0-1z"/>
+                            <path fill-rule="evenodd" d="M7.646 4.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 5.707V14.5a.5.5 0 0 1-1 0V5.707L5.354 7.854a.5.5 0 1 1-.708-.708z"/>
+                        </svg>
+                        Einstellungen laden (.json)
+                    </label>
+                    <input type="file" id="json-upload-input" accept=".json" style="display: none;">
+                </div>
+                <div class="dicom-controls">
+                    <div class="wl-control-row">
+                        <div class="input-stepper-line">
+                            <label for="input-wl">Level:</label>
+                            <input type="number" id="input-wl" step="10" value="40">
+                            <div class="stepper-buttons">
+                                <button class="step-btn step-up" data-target-input="input-wl" data-target-slider="slider-wl" data-step="20" title="Level +20">&#9650;</button>
+                                <button class="step-btn step-down" data-target-input="input-wl" data-target-slider="slider-wl" data-step="-20" title="Level -20">&#9660;</button>
+                            </div>
+                        </div>
+                        <input type="range" id="slider-wl" min="-1500" max="1500" step="10" value="40">
+                    </div>
+                    <div class="wl-control-row">
+                        <div class="input-stepper-line">
+                            <label for="input-ww">Width:</label>
+                            <input type="number" id="input-ww" step="10" min="1" value="400">
+                            <div class="stepper-buttons">
+                                <button class="step-btn step-up" data-target-input="input-ww" data-target-slider="slider-ww" data-step="20" title="Width +20">&#9650;</button>
+                                <button class="step-btn step-down" data-target-input="input-ww" data-target-slider="slider-ww" data-step="-20" title="Width -20">&#9660;</button>
+                            </div>
+                        </div>
+                        <input type="range" id="slider-ww" min="1" max="4000" step="10" value="400">
+                    </div>
+                </div>
+                <div class="reset-button-container">
+                    <button id="btn-reset-wlww" title="W/L auf Standard zurücksetzen">Reset W/L</button>
+                </div>
+                <div class="preset-controls">
+                    <span>Presets: </span>
+                    <button class="preset-btn" data-wl="40" data-ww="80">Gehirn</button>
+                    <button class="preset-btn" data-wl="30" data-ww="30">Stroke</button>
+                    <button class="preset-btn" data-wl="50" data-ww="350">Mediastinum</button>
+                    <button class="preset-btn" data-wl="50" data-ww="400">Abdomen</button>
+                    <button class="preset-btn" data-wl="-600" data-ww="1500">Lunge</button>
+                    <button class="preset-btn" data-wl="600" data-ww="2500">Knochen</button>
+                    <button class="preset-btn" data-wl="40" data-ww="400">Weichteil</button>
+                    <button class="preset-btn" data-wl="0.5" data-ww="1" title="Optimale Ansicht für binäre Masken (Werte 0 und 1)">Maske</button>
+                </div>
+                <div class="navigation-controls" id="dicom-nav-controls-wl">
+                    <button id="btn-previous-wl" title="Vorheriges Bild (Pfeil Hoch)"> &lt; Vorheriges</button>
+                    <button id="btn-next-wl" title="Nächstes Bild (Pfeil Runter)">Nächstes &gt; </button>
+                </div>
+                <hr>
+                <button id="btn-apply-wl" class="save-button" title="Aktuelle Fensterung übernehmen & Methode wählen">Fensterung übernehmen & Methode wählen</button>
+            </div>
+
+            <div id="method-selection" class="controls-stage controls-stage-select hidden">
+                <h2>Segmentierungsmethode wählen</h2>
+                <div class="controls method-buttons">
+                    <button id="btn-select-sam" data-method="sam" class="method-card" title="Interaktive Segmentierung mit Punkten/Box und SAM">
+                        <span class="method-card-title">Annotieren (SAM)</span>
+                        <span class="method-card-desc">Interaktiv mit Punkten/Box – präzise, manuell steuerbar</span>
+                    </button>
+                    <button id="btn-select-thresh" data-method="threshold" class="method-card" title="Segmentierung über Schwellenwerte (Pixel-/HU-Werte etc.)">
+                        <span class="method-card-title">Thresholding</span>
+                        <span class="method-card-desc">Automatisch über HU-Schwellenwerte – schnell bei klaren Kontrasten</span>
+                    </button>
+                </div>
+                <hr>
+                <button id="btn-back-to-wl-from-select" title="Zurück zur Fensterungseinstellung">Zurück zur Fensterung</button>
+            </div>
+
+            <div id="controls-annotate-sam" class="controls-stage controls-stage-2a hidden">
+                <h2>Stufe 2a: Annotieren (SAM)</h2>
+                <div class="fixed-wl-info">
+                    <div>Fensterung: L=<span id="fixed-wl-display-sam">?</span>, W=<span id="fixed-ww-display-sam">?</span></div>
+                    <button id="btn-back-to-method-select-from-sam" title="Andere Segmentierungsmethode wählen">Methode ändern</button>
+                </div>
+
+                <div class="slice-range-box" data-range-host="sam" style="margin: 8px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background-color: var(--surface-1);">
+                    <div style="font-weight:600;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-faint);margin-bottom:8px;">Segmentierungs-Bereich (optional)</div>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:0.88em;">
+                        <label style="display:flex;align-items:center;gap:4px;">Von Slice:
+                            <input type="number" class="slice-range-start" min="0" placeholder="0" style="width:70px;padding:3px;">
+                        </label>
+                        <label style="display:flex;align-items:center;gap:4px;">Bis Slice:
+                            <input type="number" class="slice-range-end" min="0" placeholder="N-1" style="width:70px;padding:3px;">
+                        </label>
+                        <button type="button" class="slice-range-reset action-button" style="padding:0 14px;height:28px;font-size:0.85em;background-color:var(--surface-hover);">Ganze Serie</button>
+                    </div>
+                    <small style="display:block;margin-top:4px;color:var(--text-muted);font-size:0.8em;">Leer/Reset = gesamte Serie. Slices außerhalb werden auf Null gesetzt.</small>
+                </div>
+
+                <div class="annotation-container">
+                    <h3>Annotation</h3>
+                    <div class="annotation-tools">
+                        <button id="btn-box" title="Markiere dein Segment" data-tool="box">Box</button>
+                        <button id="btn-freehand" title="Region mit freier Hand zeichnen (Lasso)" data-tool="freehand">Freihand</button>
+                        <button id="btn-positive" title="Soll segmentiert werden" data-tool="positive">Positiv</button>
+                        <button id="btn-negative" title="Soll nicht segmentiert werden" data-tool="negative">Negativ</button>
+                    </div>
+                    <div class="annotation-tools">
+                        <button id="btn-undo" title="Letzte Annotation entfernen (Strg+Z)">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-arrow-counterclockwise" viewBox="0 0 16 16">
+                                <path fill-rule="evenodd" d="M8 3a5 5 0 1 1-4.546 2.914.5.5 0 0 0-.908-.417A6 6 0 1 0 8 2z"/>
+                                <path d="M8 4.466V.534a.25.25 0 0 0-.41-.192L5.23 2.308a.25.25 0 0 0 0 .384l2.36 1.966A.25.25 0 0 0 8 4.466"/>
+                            </svg> Rückgängig</button>
+                        <button id="btn-reset" title="Alle Annotationen für dieses Bild zurücksetzen.">Reset Annotationen</button>
+                    </div>
+                </div>
+
+                <!-- Aktions-Buttons direkt unter der Annotation (verschoben, damit kein Scrollen nötig) -->
+                <div class="navigation-controls" id="sam-action-controls">
+                    <button id="btn-segment-sam" class="save-button" title="SAM-Segmentierung für aktuellen Slice durchführen">Segmentieren (SAM)</button>
+                </div>
+                <button id="btn-refine-with-threshold" class="hidden" title="SAM-Ergebnis mit Thresholding verfeinern" style="margin: 8px 0; background: var(--green); color: #fff; border: none; border-radius: var(--radius-pill); font-weight: 600; padding: 8px 18px; width: 100%;">
+                    🔬 Mit Thresholding verfeinern</button>
+
+                <div class="template-controls">
+                    <details class="advanced-group"><summary>Vorlagen</summary>
+                    <div class="template-actions">
+                        <button id="btn-save-template" title="Aktuelle Annotationen (Box/Punkte) als Vorlage speichern">
+                            Vorlage speichern
+                        </button>
+                        <button id="btn-apply-template" title="Gespeicherte Vorlage auf DIESES aktuelle Bild anwenden (überschreibt aktuelle Zeichnungen!)" disabled>
+                            Vorlage auf Aktuelles
+                        </button>
+                        <button id="btn-apply-template-multi" title="Gespeicherte Vorlage auf ausgewählte Bilder anwenden" disabled>
+                            Vorlage auf Auswahl...
+                        </button>
+                    </div>
+
+                    <div id="template-selection-panel" class="hidden">
+                        <p>Vorlage auf Slices der Achse '<span id="template-axis-info"></span>' anwenden:</p>
+
+                        <div class="template-range-selection">
+                            <div class="slice-input-group">
+                                <label for="template-slice-from">Von Slice:</label>
+                                <input type="number" id="template-slice-from" min="1">
+                            </div>
+                            <div class="slice-input-group">
+                                <label for="template-slice-to">Bis Slice:</label>
+                                <input type="number" id="template-slice-to" min="1">
+                            </div>
+                            <button id="btn-select-range-template" title="Checkboxen im angegebenen Bereich auswählen">Bereich markieren</button>
+                        </div>
+                        <hr class="template-hr">
+
+                        <div class="panel-controls">
+                            <a href="#" id="panel-select-all">Alle auswählen</a> |
+                            <a href="#" id="panel-deselect-all">Auswahl aufheben</a>
+                        </div>
+                        <div id="template-image-list" class="panel-image-list">
+                        </div>
+                        <button id="btn-confirm-template-apply" class="save-button" disabled>
+                            Vorlage auf X Slices anwenden
+                        </button>
+                    </div>
+                    </details>
+                </div>
+
+                <div class="navigation-controls" id="dicom-nav-controls-sam">
+                    <button id="btn-previous-sam" title="Vorheriges Bild (Pfeil Hoch)"> &lt; Vorheriges</button>
+                    <button id="btn-next-sam" title="Zum nächsten Bild (Pfeil Runter)" disabled>Weiter &gt;</button>
+                </div>
+                <button id="btn-mark-others-empty-sam" title="Alle übrigen, noch nicht gespeicherten Bilder als 'ohne Segmentierung' markieren und überspringen (für SAM)." style="margin: 8px 0;">Restliche überspringen</button>
+
+                <div class="finalize-controls" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid var(--border);">
+                    <div class="post-processing-options">
+    <h4>Nachbearbeitung (Optional):</h4>
+    <label style="cursor: help;" title="Füllt Voxel in der Segmentierung, die nur von Positiven umgeben sind."></label>
+        <input type="checkbox" id="cb-fill-holes-sam"> Löcher füllen
+    </label>
+    <label style="cursor: help;" title="Entfernt Voxel, die als Ausreißer betrachtet werden."></label>
+        <input type="checkbox" id="cb-remove-outliers-sam"> Ausreißer entfernen
+    </label>
+    
+    <label>
+    (min. Größe: <input type="number" id="input-min-outlier-size-sam" value="100" min="1" step="10" style="width: 60px;"> Voxel)
+</label>
+<label style="cursor: help;" title="Zeigt eine Vorschau der Voxel-Größe als Querschnitt eines Würfels oben rechts im Viewer an.">
+    <input type="checkbox" id="cb-show-voxel-size-sam"> Vorschau
+</label>
+    </div>
+                    
+                    <div class="material-density-options" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid var(--border);">
+                        <h4>Material-Dichte (Optional):</h4>
+                        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <span>Dichte:</span>
+                            <input type="number" id="input-material-density-sam" step="0.01" min="0" placeholder="z.B. 1.05" style="width: 80px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text);">
+                            <span style="font-size: 0.9em; color: var(--text-muted);">g/cm³</span>
+                        </label>
+                        <p style="font-size: 0.85em; color: var(--text-muted); margin: 5px 0 0 0;">
+                            Für Gewichtsberechnung. Beispiele: Wasser = 1.0, Blut = 1.05, Knochen = 1.8
+                        </p>
+                    </div>
+                    
+                    <!-- HYBRID VERFEINERUNG: SAM + Thresholding (über Material-Dichte und Finalize-Button) -->
+                    <div id="hybrid-refinement-container" class="hidden" style="margin-top: 15px; padding: 12px; border: 1px solid var(--green); border-radius: var(--radius-sm); background-color: var(--surface-1);">
+                        <h4 style="margin: 0 0 10px 0; color: var(--success);">🔬 Mit Thresholding verfeinern</h4>
+                        <p style="font-size: 0.85em; color: var(--text-dim); margin: 0 0 10px 0;">
+                            Verfeinern Sie die SAM-Maske mit pixelgenauer Thresholding-Präzision
+                        </p>
+                        
+                        <div class="thresh-control-row">
+                            <label for="hybrid-thresh-lower">Untere Grenze:</label>
+                            <div class="input-stepper-line">
+                                <input type="range" id="hybrid-slider-thresh-lower" min="-1000" max="1000" value="-500" step="1">
+                                <input type="number" id="hybrid-input-thresh-lower" value="-500" step="10">
+                                <div class="stepper-buttons">
+                                    <button type="button" class="step-btn step-up" data-target="hybrid-input-thresh-lower">▲</button>
+                                    <button type="button" class="step-btn step-down" data-target="hybrid-input-thresh-lower">▼</button>
+                                </div>
+                            </div>
+                            <span id="hybrid-display-thresh-lower">-500</span>
+                        </div>
+                        
+                        <div class="thresh-control-row">
+                            <label for="hybrid-thresh-upper">Obere Grenze:</label>
+                            <div class="input-stepper-line">
+                                <input type="range" id="hybrid-slider-thresh-upper" min="-1000" max="1000" value="500" step="1">
+                                <input type="number" id="hybrid-input-thresh-upper" value="500" step="10">
+                                <div class="stepper-buttons">
+                                    <button type="button" class="step-btn step-up" data-target="hybrid-input-thresh-upper">▲</button>
+                                    <button type="button" class="step-btn step-down" data-target="hybrid-input-thresh-upper">▼</button>
+                                </div>
+                            </div>
+                            <span id="hybrid-display-thresh-upper">500</span>
+                        </div>
+                        
+                        <div style="display: flex; gap: 10px; margin: 15px 0 0 0; align-items: stretch; width: 100%; box-sizing: border-box;">
+                            <button id="btn-apply-hybrid-refinement" class="save-button" title="Threshold-Werte speichern" style="flex: 1; padding: 10px 12px; font-weight: 600; max-width: calc(70% - 5px);">
+                                Threshold-Werte speichern
+                            </button>
+                            <button id="btn-cancel-hybrid-refinement" title="Verfeinerung abbrechen" style="flex: 0 0 auto; padding: 10px 14px; background-color: var(--surface-hover); color: var(--text); border: none; border-radius: var(--radius-pill); font-weight: 600; cursor: pointer; max-width: calc(30% - 5px);">
+                                Abbrechen
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <button id="btn-finalize-sam" class="save-button" title="Ganze Serie abschließen (SAM) und 3D-Maske optional erstellen" style="width: 80%; margin-top: 10px;">
+                        Bearbeitung (SAM) abschließen</button>
+                </div>
+
+                <!-- Few-Shot-Segmentierung Box -->
+                <div class="controls-sub-section fewshot-box" style="margin-bottom: 18px; margin-top: 18px;">
+                  <details class="advanced-group"><summary>Few-Shot-Segmentierung</summary>
+                  <p style="font-size: 0.92em; color: var(--text-dim);">
+                    Nachdem Sie mit SAM segmentiert haben, können Sie auch die Few-Shot-Mechanik testen.<br>
+                    Wählen Sie Ihre Maske(n) aus, die Sie dafür nutzen wollen:
+                  </p>
+                  <div id="fewshot-mask-list" style="margin-bottom: 10px;">
+                  </div>
+                  
+                  <!-- HYBRID OPTION FÜR FEW-SHOT (vereinfacht) -->
+                  <div class="fewshot-threshold-option" style="margin: 10px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background-color: var(--surface-2);">
+                    <label style="display: flex; align-items: center; gap: 8px; margin: 0; cursor: pointer;">
+                      <input type="checkbox" id="cb-fewshot-threshold-enabled" style="margin: 0;">
+                      <span style="font-weight: 600; color: var(--text-dim);">🔬 Mit vorher definierten Thresholding-Werten verfeinern</span>
+                      <span class="info-icon" data-modal-title="Few-Shot + Thresholding" data-modal-content="<p>Aktivieren Sie diese Option, um die Few-Shot Ergebnisse automatisch mit den zuletzt in der manuellen SAM-Verfeinerung gesetzten Thresholding-Werten zu verfeinern.</p><p><strong>Workflow:</strong></p><ol><li>Few-Shot erstellt grobe Masken für alle Slices</li><li>In jeder Maske wird pixelgenaues Thresholding mit den vordefinierten Werten angewendet</li><li>Das Ergebnis kombiniert die Intelligenz von SAM2 mit der Präzision des Thresholdings</li></ol><p>Stellen Sie zunächst die Thresholding-Werte bei der manuellen SAM-Verfeinerung ein, bevor Sie diese Option verwenden.</p>" style="cursor: pointer; user-select: none;">&#9432;</span>
+                    </label>
+                    <p style="font-size: 0.85em; color: var(--text-muted); margin: 4px 0 0 24px; font-style: italic;">
+                      Verwendet die zuletzt in der manuellen SAM-Verfeinerung gesetzten Threshold-Werte.
+                    </p>
+                  </div>
+                  
+                  <div class="fewshot-button-group" style="display: flex; gap: 10px; margin-top: 10px; align-items: flex-start;">
+                <div style="flex: 1 1 0; display: flex; align-items: center; gap: 6px; min-width: 0;">
+                    <button id="start-fewshot-interpolation-btn" class="action-button" style="width:100%;" disabled title="Nutzt eine bidirektionale Interpolation zwischen den Support-Masken. Gut für gleichmäßige Objekte.">Few-Shot mit Interpolation</button>
+                <span class="info-icon" data-modal-title="Interpolations-Methode" data-modal-content="<p>Die Interpolations-Methode nutzt eine bidirektionale Interpolation zwischen den ausgewählten Support-Masken.</p><p>Diese Methode eignet sich besonders gut für:</p><ul><li>Gleichmäßige, sich langsam verändernde Objekte</li><li>Strukturen mit kontinuierlicher Form über mehrere Slices</li><li>Fälle, in denen Sie mehrere Support-Masken in verschiedenen Bereichen haben</li></ul><p>Die Methode interpoliert die Masken zwischen den Support-Punkten und extrapoliert für die Bereiche außerhalb.</p><p><strong>Empfehlung:</strong> Wählen Sie Support-Masken, die repräsentativ für verschiedene Bereiche des zu segmentierenden Objekts sind.</p>" style="cursor: pointer; user-select: none;">&#9432;</span>
+                </div>
+                <div style="flex: 1 1 0; display: flex; align-items: center; gap: 6px; min-width: 0;">
+                    <button id="start-memory-btn" class="action-button" style="width:100%;" disabled title="Nutzt SAM2's Memory-Attention für robuste Segmentierung. Besonders gut bei Objekten mit Lücken.">Memory</button>
+                    <span class="info-icon" data-modal-title="Memory-Attention-Methode" data-modal-content="<p>Die Memory-Attention-Methode nutzt SAM2's natürlichen Cross-Attention-Mechanismus für intelligente Segmentierung.</p><p><strong>Funktionsweise:</strong></p><ul><li>Nutzt ALLE Support-Masken in einem gemeinsamen Memory</li><li>SAM2 entscheidet via Attention, welche Referenzen am relevantesten sind</li><li>Visuell-basierte Gewichtung statt linearer Interpolation</li><li>Hochkonfidente Masken werden als neue Memory-Anker verwendet</li></ul><p><strong>Besonders geeignet für:</strong></p><ul><li>Objekte, die zwischendurch verschwinden und wieder erscheinen</li><li>Komplexe anatomische Strukturen mit variablen Formen</li><li>Fälle mit mehreren Support-Masken (2-5 empfohlen)</li><li>Maximale Nutzung von SAM2's Video-Segmentierungs-Architektur</li></ul><p><strong>Vorteile:</strong> Robuster bei Lücken und näher am ursprünglichen SAM2-Design als andere Methoden.</p>" style="cursor: pointer; user-select: none;">&#9432;</span>
+                </div>
+                <div style="flex: 1 1 0; display: flex; align-items: center; gap: 6px; min-width: 0;">
+                    <button id="start-s1sfq-btn" class="action-button" style="width:100%;" disabled title="Nutzt die S1SFQ-Methode aus dem Paper. Segmentiert von der Mitte nach außen, um die Genauigkeit zu verbessern.">S1SFQ</button>
+                    <span class="info-icon" data-modal-title="S1SFQ-Methode" data-modal-content="<p>Die S1SFQ-Methode (Single-Slice Support with Forward Query) ist eine spezialisierte Few-Shot-Segmentierungstechnik.</p><p><strong>Funktionsweise:</strong></p><ul><li>Benötigt genau EINE Support-Maske als Referenz</li><li>Segmentiert die restlichen Slices sequentiell von der Mitte nach außen</li><li>Jede neue Segmentierung wird als Kontext für die nächste verwendet</li><li>Verbessert die Genauigkeit durch kontinuierliches Lernen</li></ul><p><strong>Besonders geeignet für:</strong></p><ul><li>Komplexe anatomische Strukturen</li><li>Objekte mit graduellen Formveränderungen</li><li>Fälle, in denen eine zentrale Slice gut repräsentativ ist</li></ul><p>Diese Methode stammt aus aktueller Forschung und kann bei vielen medizinischen Segmentierungsaufgaben bessere Ergebnisse als einfache Interpolation liefern.</p>" style="cursor: pointer; user-select: none;">&#9432;</span>
+                </div>
+                </div>
+                <div class="upload-mask-container" style="margin-bottom: 20px; margin-top: 20px; padding: 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);">
+                <h4 style="margin: 0 0 8px 0; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint);">Eigene Support-Maske hochladen:</h4>
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <input type="file" id="mask-upload-input" accept=".png" style="flex-grow: 1;">
+                <div style="display: flex; align-items: center; gap: 5px;">
+                <label for="mask-slice-index-input" style="font-size: 0.9em;">Für Slice:</label>
+                <input type="number" id="mask-slice-index-input" min="1" value="1" style="width: 60px; padding: 4px;">
+                </div>
+                <button id="btn-upload-mask" class="action-button" style="background-color: var(--surface-hover);">Hochladen</button>
+                </div>
+                <small style="display: block; margin-top: 8px; color: var(--text-muted);">Die Maske muss eine binäre PNG-Datei sein und exakt die Dimensionen des Zielslices haben.</small>
+                </div>
+                </details>
+                </div>
+            </div>
+
+            <div id="controls-threshold" class="controls-stage controls-stage-2b hidden">
+                <h2>Stufe 2b: Thresholding</h2>
+                <div class="fixed-wl-info">
+                    <div>Fensterung (nur zur Info): L=<span id="fixed-wl-display-thresh">?</span>, W=<span id="fixed-ww-display-thresh">?</span></div>
+                    <button id="btn-back-to-method-select-from-thresh" title="Andere Segmentierungsmethode wählen">Methode ändern</button>
+                </div>
+
+                <div class="slice-range-box" data-range-host="threshold" style="margin: 8px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background-color: var(--surface-1);">
+                    <div style="font-weight:600;font-size:0.78rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-faint);margin-bottom:8px;">Segmentierungs-Bereich (optional)</div>
+                    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:0.88em;">
+                        <label style="display:flex;align-items:center;gap:4px;">Von Slice:
+                            <input type="number" class="slice-range-start" min="0" placeholder="0" style="width:70px;padding:3px;">
+                        </label>
+                        <label style="display:flex;align-items:center;gap:4px;">Bis Slice:
+                            <input type="number" class="slice-range-end" min="0" placeholder="N-1" style="width:70px;padding:3px;">
+                        </label>
+                        <button type="button" class="slice-range-reset action-button" style="padding:0 14px;height:28px;font-size:0.85em;background-color:var(--surface-hover);">Ganze Serie</button>
+                    </div>
+                    <small style="display:block;margin-top:4px;color:var(--text-muted);font-size:0.8em;">Leer/Reset = gesamte Serie. Slices außerhalb werden auf Null gesetzt.</small>
+                </div>
+
+                <div class="threshold-controls">
+                    <p>Schwellenwerte (Pixel-/HU-Werte):</p>
+                    <div class="thresh-control-row">
+                        <div class="input-stepper-line">
+                            <label for="input-thresh-lower">Untere Grenze:</label>
+                            <input type="number" id="input-thresh-lower" step="10" value="-500">
+                            <div class="stepper-buttons">
+                                <button class="step-btn step-up" data-target-input="input-thresh-lower" data-target-slider="slider-thresh-lower" data-step="10" title="Untere Grenze +10">&#9650;</button>
+                                <button class="step-btn step-down" data-target-input="input-thresh-lower" data-target-slider="slider-thresh-lower" data-step="-10" title="Untere Grenze -10">&#9660;</button>
+                            </div>
+                            <span id="display-thresh-lower" style="margin-left: 5px; font-weight: bold; min-width: 30px; text-align: left;">-500</span>
+                        </div>
+                        <input type="range" id="slider-thresh-lower" min="-1500" max="3000" step="10" value="-500">
+                    </div>
+                    <div class="thresh-control-row">
+                        <div class="input-stepper-line">
+                            <label for="input-thresh-upper">Obere Grenze:</label>
+                            <input type="number" id="input-thresh-upper" step="10" value="500">
+                            <div class="stepper-buttons">
+                                <button class="step-btn step-up" data-target-input="input-thresh-upper" data-target-slider="slider-thresh-upper" data-step="10" title="Obere Grenze +10">&#9650;</button>
+                                <button class="step-btn step-down" data-target-input="input-thresh-upper" data-target-slider="slider-thresh-upper" data-step="-10" title="Obere Grenze -10">&#9660;</button>
+                            </div>
+                            <span id="display-thresh-upper" style="margin-left: 5px; font-weight: bold; min-width: 30px; text-align: left;">500</span>
+                        </div>
+                        <input type="range" id="slider-thresh-upper" min="-1500" max="3000" step="10" value="500">
+                    </div>
+                    <div class="reset-button-container">
+                        <button id="btn-reset-thresh" title="Schwellenwerte zurücksetzen">Reset Thresholds</button>
+                    </div>
+                </div>
+                <div class="finalize-controls" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid var(--border);">
+                    <div class="post-processing-options">
+                    <h4>Nachbearbeitung (Optional):</h4>
+                    <label style="cursor: help;" title="Füllt Voxel in der Segmentierung, die nur von Positiven umgeben sind."></label>
+                    <input type="checkbox" id="cb-fill-holes-sam"> Löcher füllen
+                    </label>
+                    <label style="cursor: help;" title="Entfernt Voxel, die als Ausreißer betrachtet werden."></label>
+                    <input type="checkbox" id="cb-remove-outliers-sam"> Ausreißer entfernen
+                    </label>
+                    <label>
+    (min. Größe: <input type="number" id="input-min-outlier-size-sam" value="100" min="1" step="10" style="width: 60px;"> Voxel)
+</label>
+<label style="cursor: help;" title="Zeigt eine Vorschau der Voxel-Größe als Querschnitt eines Würfels oben rechts im Viewer an.">
+    <input type="checkbox" id="cb-show-voxel-size-sam"> Vorschau
+</label>
+                </div>
+                    
+                    <div class="material-density-options" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid var(--border);">
+                        <h4>Material-Dichte (Optional):</h4>
+                        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                            <span>Dichte:</span>
+                            <input type="number" id="input-material-density-thresh" step="0.01" min="0" placeholder="z.B. 1.05" style="width: 80px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text);">
+                            <span style="font-size: 0.9em; color: var(--text-muted);">g/cm³</span>
+                        </label>
+                        <p style="font-size: 0.85em; color: var(--text-muted); margin: 5px 0 0 0;">
+                            Für Gewichtsberechnung. Beispiele: Wasser = 1.0, Blut = 1.05, Knochen = 1.8
+                        </p>
+                    </div>
+                    
+                    <button id="btn-finalize-thresh" class="save-button" title="Ganze Serie abschließen (Threshold) und 3D-Maske optional erstellen" style="width: 80%; margin-top: 10px;">
+                        Bearbeitung (Thresh) abschließen</button>
+                </div>
+            </div>
+            
+            <!-- Gewichtsinformationen -->
+            <div id="weight-info" class=hidden style="margin-bottom: 15px; padding: 14px 16px; background-color: var(--success-bg); border: 1px solid rgba(102, 153, 0, 0.4); border-radius: var(--radius-sm);">
+                <h5 style="margin: 0 0 8px 0; color: var(--success);">Volumetrische Analyse:</h5>
+                <div style="display: flex; flex-direction: column; gap: 5px; font-size: 0.9em;">
+                    <div><strong>Volumen:</strong> <span id="volume-display">-</span> cm³</div>
+                    <div><strong>Gewicht:</strong> <span id="weight-display">-</span> g</div>
+                    <div><strong>Material-Dichte:</strong> <span id="density-display">-</span> g/cm³</div>
+                </div>
+            </div>
+
+            <div id="image-list-container" class="">
+                <p>Slice auswählen:</p>
+                <ul id="image-list">
+                </ul>
+            </div>
+                <hr>
+
+            <div id="result-actions" class="hidden" style="margin-top: 20px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background-color: var(--surface-2);">
+                <h4>Ergebnis-Aktionen:</h4>
+
+                <div class="ground-truth-comparison" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border);">
+                    <h4>Ground-Truth-Vergleich:</h4>
+                        <p style="font-size: 0.9em; color: var(--text-muted);">Laden Sie Ihre Ground-Truth-Maske (NIfTI, NRRD oder STL) hoch, um sie mit dem erstellten Modell zu vergleichen. STL wird auf das Gitter Ihrer Segmentierung voxelisiert und muss im selben Koordinatensystem wie der Scan liegen.</p>
+                        <input type="file" id="gt-file-input" accept=".nii,.nii.gz,.nrrd,.stl" style="display: none;">
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+        <label for="gt-file-input" class="action-button" style = "flex: 1;" title="NIfTI-, NRRD- oder STL-Datei hochladen">
+            Datei auswählen...
+        </label>
+    </div>
+
+    <div id="gt-file-name-display" class="file-name" style="display: none; margin-top: 10px;"></div>
+
+    <div id="comparison-metrics-display" class="hidden" style="margin-top: 15px; padding: 12px 14px; background-color: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);">
+    <h5 style="margin: 0 0 8px 0; color: var(--text);">Vergleichsergebnisse:</h5>
+    <div class="metrics-container">
+        <div class="metric-row">
+            <div class="metric-label">
+                <strong>Dice-Koeffizient:</strong>
+                <span class="info-icon" 
+                      data-modal-title="Dice-Koeffizient" 
+                      data-modal-content="<p>Der Dice-Koeffizient misst die prozentuale Überlappung zwischen zwei Segmentierungen. Der Wert reicht von 0 (keine Überlappung) bis 1 (perfekte Übereinstimmung).</p><p><strong>Gute Werte:</strong> > 0.7</p><p><strong>Exzellente Werte:</strong> > 0.9</p>">i</span>
+            </div>
+            <span id="dice-score-display" class="metric-value">-</span>
+        </div>
+        <div class="metric-row">
+            <div class="metric-label">
+                <strong>Durchschn. Oberflächenabstand (ASSD):</strong>
+                <span class="info-icon"
+                      data-modal-title="Durchschnittlicher Symmetrischer Oberflächenabstand (ASSD)"
+                      data-modal-content="<p>Die ASSD misst den durchschnittlichen Abstand zwischen den Oberflächen der beiden 3D-Modelle in Millimetern.</p><p>Ein kleinerer Wert ist besser und gibt an, wie genau die Form der Segmentierung der wahren Form entspricht.</p>">i</span>
+            </div>
+            <span id="assd-display" class="metric-value">-</span>
+        </div>
+         <div class="metric-row">
+        <div class="metric-label">
+            <strong>Sensitivität (TPR):</strong>
+            <span class="info-icon" data-modal-title="Sensitivität (True Positive Rate)" data-modal-content="<p>Gibt an, wie viel Prozent der Ground-Truth-Maske korrekt erkannt wurden.</p><p><strong>Formel:</strong> TP / (TP + FN)</p>">i</span>
+        </div>
+        <span id="sensitivity-display" class="metric-value">-</span>
+    </div>
+    <div class="metric-row">
+        <div class="metric-label">
+            <strong>Präzision (PPV):</strong>
+            <span class="info-icon" data-modal-title="Präzision (Positive Predictive Value)" data-modal-content="<p>Gibt an, wie viel Prozent der erstellten Segmentierung tatsächlich korrekt ist.</p><p><strong>Formel:</strong> TP / (TP + FP)</p>">i</span>
+        </div>
+        <span id="precision-display" class="metric-value">-</span>
+    </div>
+    <div class="metric-row">
+        <div class="metric-label">
+            <strong>Spezifität (TNR):</strong>
+            <span class="info-icon" data-modal-title="Spezifität (True Negative Rate)" data-modal-content="<p>Gibt an, wie viel Prozent des Hintergrunds korrekt als Hintergrund identifiziert wurden.</p><p><strong>Formel:</strong> TN / (TN + FP)</p>">i</span>
+        </div>
+        <span id="specificity-display" class="metric-value">-</span>
+    </div>
+    </div>
+        <div class="metric-row">
+            <div class="metric-label">
+                <strong>Volumendifferenz:</strong>
+                <span class="info-icon"
+                      data-modal-title="Volumendifferenz"
+                      data-modal-content="<p>Dies ist die einfache Differenz zwischen dem Volumen der generierten Maske und der Ground-Truth-Maske in Prozent [%].</p><p>Ein Wert nahe 0 ist ideal.</p><p><strong>Positiver Wert:</strong> Die generierte Maske ist größer.</p><p><strong>Negativer Wert:</strong> Die generierte Maske ist kleiner.</p>">i</span>
+            </div>
+            <span id="volume-diff-display" class="metric-value">-</span>
+        </div>
+    </div>
+                </div>
+
+                <div class="result-nav">
+                    <button id="btn-download-results" class="action-button" title="Ergebnis herunterladen, in iRODS ablegen oder als DICOM-SEG in die Datenbank schreiben">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                            <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                        </svg>
+                        Ergebnis speichern&hellip;
+                    </button>
+                    <button id="btn-back-to-annotation" class="action-button" title="Zurück zur Annotations-Stufe, um weitere Änderungen vorzunehmen">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path fill-rule="evenodd" d="M12.5 15a.5.5 0 0 1-.5-.5v-3h-5a.5.5 0 0 1 0-1h5v-3a.5.5 0 0 1 .854-.354l2.5 2.5a.5.5 0 0 1 0 .708l-2.5 2.5A.5.5 0 0 1 12.5 15z"/>
+                            <path fill-rule="evenodd" d="M12 8a.5.5 0 0 0-.5-.5H2.707l2.147-2.146a.5.5 0 1 0-.708-.708l-3 3a.5.5 0 0 0 0 .708l3 3a.5.5 0 0 0 .708-.708L2.707 8.5H11.5A.5.5 0 0 0 12 8z"/>
+                        </svg>
+                        Zurück
+                        </button>
+                    <button id="btn-retry-segmentation" data-url="{{ url_for('main.dicom_viewer') }}" class="action-button" title="Mit denselben Daten eine neue Segmentierung starten">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M11.534 7h3.932a.25.25 0 0 1 .192.41l-1.966 2.36a.25.25 0 0 1-.384 0l-1.966-2.36a.25.25 0 0 1 .192-.41zm-11 2h3.932a.25.25 0 0 0 .192-.41L2.692 6.23a.25.25 0 0 0-.384 0L.342 8.59A.25.25 0 0 0 .534 9z"/>
+                            <path fill-rule="evenodd" d="M8 3c-1.552 0-2.94.707-3.857 1.818a.5.5 0 1 1-.771-.636A6.002 6.002 0 0 1 13.917 7H12.9A5.002 5.002 0 0 0 8 3zM3.1 9a5.002 5.002 0 0 0 8.757 2.182.5.5 0 1 1 .771.636A6.002 6.002 0 0 1 2.083 9H3.1z"/>
+                        </svg>
+                        Segmentierung ab Fensterung wiederholen
+                    </button>
+                    <button id="btn-new-segmentation-link" data-url="{{ url_for('main.index') }}"  class="action-button" title="Komplett neue Segmentierung mit neuen Daten starten">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                            <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
+                            <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
+                        </svg>
+                        Neue Segmentierung starten
+                    </button>
+                </div>
+
+                <div id="status-message">Initialisiere...</div>
+                </div>
+            </div>
+    </div>
+
+    <div id="confirmation-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="confirmation-modal-title">Bestätigung</h3>
+                <button id="confirmation-modal-close" class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmation-modal-text">Möchten Sie diese Aktion wirklich durchführen?</p>
+            </div>
+            <div class="modal-footer">
+                <button id="confirmation-modal-cancel" class="modal-btn secondary">Abbrechen</button>
+                <button id="confirmation-modal-confirm" class="modal-btn primary">Bestätigen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Initialisierungsdaten -->
+    <script>
+        // Globale Variablen wie sie von script_dicom.js erwartet werden
+        window.initialImageFiles = '{{ image_filenames|safe }}';
+        window.initialFileType = '{{ initial_file_type }}';
+        window.initialSliceCounts = '{{ initial_slice_counts|safe }}';
+        window.initialBaseFilename = '{{ initial_base_filename|safe }}';
+        window.availableSeries = {{ available_series|safe }};
+        window.selectedSeriesNumber = {{ selected_series_number|safe }};
+    </script>
+
+    <script>
+        // Serien-Auswahl-Dropdown initialisieren
+        (function() {
+            const container = document.getElementById('series-selector-container');
+            const select = document.getElementById('series-select');
+            if (!container || !select) return;
+
+            const series = Array.isArray(window.availableSeries) ? window.availableSeries : [];
+            if (series.length < 2) return; // Nur anzeigen wenn mehrere Serien verfügbar
+
+            select.innerHTML = '';
+            series.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.number;
+                const desc = s.description || '(ohne Beschreibung)';
+                opt.textContent = `Serie ${s.number}: ${desc} [${s.modality}, ${s.count} Bilder]`;
+                if (s.number === window.selectedSeriesNumber) opt.selected = true;
+                select.appendChild(opt);
+            });
+            container.classList.remove('hidden');
+
+            select.addEventListener('change', async () => {
+                const target = parseInt(select.value, 10);
+                if (!Number.isFinite(target)) return;
+                select.disabled = true;
+                try {
+                    const resp = await fetch('/select_series', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({series_number: target})
+                    });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({}));
+                        alert('Serie konnte nicht geladen werden: ' + (err.error || resp.statusText));
+                        select.disabled = false;
+                        return;
+                    }
+                    // Seite neu laden, damit Viewer mit neuer Serie initialisiert wird
+                    window.location.href = '/dicom_viewer';
+                } catch (e) {
+                    alert('Netzwerkfehler beim Serienwechsel: ' + e);
+                    select.disabled = false;
+                }
+            });
+        })();
+    </script>
+
+    <!-- Skripte -->
+    <script src="{{ url_for('static', filename='js/niivue.umd.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/script_dicom.js') }}"></script>
+
+    <div id="blocking-loader" class="hidden">
+        <div class="loader-content">
+            <div class="spinner"></div>
+            <p id="loader-message">Verarbeite...</p>
+            <button id="loader-cancel-btn" class="hidden" type="button">Abbrechen</button>
+        </div>
+    </div>
+
+
+    <!-- ================= Abschluss: Ergebnis speichern ==========================
+         Herunterladen geht immer. iRODS und das Zurueckschreiben als DICOM-SEG
+         laufen ueber die Endpunkte des GUI (/irods/upload bzw.
+         /api-proxy/segmentation_upload) und stehen deshalb nur innerhalb der
+         angemeldeten GUI-Sitzung zur Verfuegung; das SEG zusaetzlich nur fuer
+         eine aus dcm4chee importierte Serie.
+         Die GUI-Pfade duerfen nirgends als href/src/action im Markup stehen -
+         der Reverse-Proxy des GUI wuerde ihnen /proxy/colleague/ voranstellen.
+    ========================================================================= -->
+    <div id="export-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Segmentierungsergebnis speichern</h3>
+                <button id="export-modal-close" class="close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="export-modal-intro">Wie soll das Ergebnis dieser Segmentierung gesichert werden?</p>
+
+                <div class="export-options">
+                    <button type="button" class="export-option" data-export="download">
+                        <span class="export-option-title">Datei herunterladen</span>
+                        <span class="export-option-desc">Alle Ergebnisse dieser Sitzung als ZIP-Archiv:
+                            3D-Modelle, Masken, Overlays und die Segmentierungsparameter.</span>
+                    </button>
+
+                    <button type="button" class="export-option" data-export="irods">
+                        <span class="export-option-title">In iRODS speichern</span>
+                        <span class="export-option-desc">Dasselbe ZIP-Archiv in einen Ordner Ihres
+                            iRODS-Bereichs legen.</span>
+                        <span class="export-option-reason hidden"></span>
+                    </button>
+
+                    <button type="button" class="export-option" data-export="seg">
+                        <span class="export-option-title">Als DICOM-SEG in die Datenbank laden</span>
+                        <span class="export-option-desc">Die Segmentierung wird als SEG-Objekt zur
+                            Originalserie in dcm4chee gespeichert und ist danach im Viewer
+                            &uuml;ber den Bildern sichtbar.</span>
+                        <span class="export-option-reason hidden"></span>
+                    </button>
+                </div>
+
+                <div id="export-status" class="status-box hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Ordnerauswahl fuer iRODS: der Browser des GUI in einem iframe, wie auf
+         der Upload-Seite. Die Auswahl meldet er per postMessage zurueck. -->
+    <div id="irods-picker-overlay" class="modal-overlay hidden">
+        <div class="modal-content picker-modal">
+            <div class="modal-header">
+                <h3>Zielordner in iRODS w&auml;hlen</h3>
+                <button id="irods-picker-close" class="close-modal">&times;</button>
+            </div>
+            <iframe id="irods-picker-frame" title="iRODS-Ordnerauswahl"></iframe>
+        </div>
+    </div>
+
+</body>
+</html>

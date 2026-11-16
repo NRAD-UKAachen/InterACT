@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .reason-icon {
+    width: 48px; height: 48px; border-radius: var(--radius); margin-bottom: 18px;
+    background: var(--warn-bg); color: #f0a939;
+    display: flex; align-items: center; justify-content: center; font-size: 1.3rem;
+  }
+  .card h2 { margin: 0 0 6px; font-size: 1.25rem; }
+  .reason-lead { color: #bbb; font-size: 0.95rem; line-height: 1.7; margin: 0 0 22px; }
+  .form-control { min-height: 88px; resize: vertical; font-size: 0.95rem; }
+  .reason-help { color: var(--text-faint); font-size: 0.82rem; margin: 10px 0 0; line-height: 1.6; }
+  .reason-note {
+    margin-top: 26px; padding-top: 20px; border-top: 1px solid #2f2f2f;
+    color: var(--text-muted); font-size: 0.84rem; line-height: 1.7;
+  }
+  .reason-note code { background: var(--surface-1); padding: 2px 6px; border-radius: 4px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+    <div class="card card--roomy">
+        <div class="reason-icon"><i class="fa-solid fa-user-shield"></i></div>
+
+        <h2>Why are you opening the access log?</h2>
+        <p class="reason-lead">
+            These records name patients and the colleagues who accessed them. Your reason is
+            written into the audit trail next to your own access, so reading the log is itself
+            accountable.
+        </p>
+
+        <form method="POST" action="{{ url_for('audit_log.state_reason') }}">
+            <input type="hidden" name="next" value="{{ next_url }}">
+
+            <label class="field-label" for="reason">Reason for access</label>
+            <textarea class="form-control" id="reason" name="reason" autofocus required
+                      minlength="{{ min_length }}"
+                      placeholder="e.g. Data protection request from patient 1151216578 (ticket INC-482), checking who accessed their study in July."></textarea>
+
+            <p class="reason-help">
+                Be specific enough that someone reading the trail in a year understands why —
+                a ticket number, a patient enquiry, a named review. At least {{ min_length }}
+                characters.
+            </p>
+
+            <div class="actions">
+                <button type="submit" class="btn btn-primary">
+                    <i class="fa-solid fa-unlock"></i> Open the access log
+                </button>
+                <a class="btn btn-ghost" href="{{ url_for('home.home') }}">Cancel</a>
+            </div>
+        </form>
+
+        <p class="reason-note">
+            You will not be asked again for {{ ttl_minutes }} minutes, so filtering and
+            exporting during one investigation stays under the same stated reason. Ending the
+            session from the log page clears it immediately.
+        </p>
+    </div>
+</div>
+{% endblock %}

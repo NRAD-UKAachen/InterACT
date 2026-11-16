@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  /* Same green step-circle convention as batch.html's wizard steps
+     (static/style.css doesn't define it -- each page that uses it owns its
+     own copy, so this one does too). */
+  .howto-step h3 .step-num {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--green);
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-right: 8px;
+  }
+
+  .howto-step {
+    margin-bottom: 24px;
+  }
+
+  .howto-step:last-child {
+    margin-bottom: 0;
+  }
+
+  .howto-step ul {
+    margin: 6px 0 0 4px;
+    padding-left: 18px;
+  }
+
+  .howto-step li {
+    margin: 4px 0;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+  <h2><i class="fa-solid fa-clipboard-check"></i> How To</h2>
+
+  <div class="card">
+
+    <div class="howto-step">
+      <h3><span class="step-num">1</span> Connect sites</h3>
+      <p>On <a href="{{ url_for('federated_instances.index') }}">Instances</a>, with each partner:</p>
+      <ul>
+        <li>Swap base URLs (<em>Copy Base URL</em>). It must be reachable from the partner's network -- use an IP if
+          unsure.</li>
+        <li><em>Add Remote Instance</em>, send them the token it shows, and paste the token they send back. The card
+          turns <strong>Connected</strong>.</li>
+        <li>Each site clicks <em>Allow</em> for the model under <em>Training Permissions</em>. Without it, that site
+          can't be selected.</li>
+      </ul>
+    </div>
+
+    <div class="howto-step">
+      <h3><span class="step-num">2</span> Upload training data at each site</h3>
+      <p>
+        On <a href="{{ url_for('federated_training_data.index') }}">Training Data</a>, upload matching
+        <code>images/</code> + <code>labels/</code> NIfTI files. Data never leaves the site -- only model weights do.
+      </p>
+      <p>Before starting, all sites must agree on (nothing checks this for you):</p>
+      <ul>
+        <li><strong>Labels</strong> -- the same number means the same structure everywhere (e.g. 1 = tumor).</li>
+        <li><strong>Images</strong> -- the same modality (CT or MRI, chosen when starting), and the same channels in the
+          same order.</li>
+      </ul>
+    </div>
+
+    <div class="howto-step">
+      <h3><span class="step-num">3</span> Start the federation</h3>
+      <p>On <a href="{{ url_for('federated_rounds.index') }}">Training Rounds</a> &rarr; <em>Start New Federation</em>:
+        pick the sites, rounds and epochs.
+        Tick <em>Also train on this site's own local training data</em> to include your own data.</p>
+      <ul>
+        <li>Round 0 analyzes every site's data and builds one shared training setup (resolution, crop size, etc.)
+          automatically.</li>
+        <li>When the run finishes, download the results zip (model, recipe and inference script) from the run's row.
+        </li>
+      </ul>
+    </div>
+
+    <div class="howto-step">
+      <h3><span class="step-num">4</span> Use the finished model</h3>
+      <p>The downloaded zip contains everything needed to run the model on its own, outside this GUI:</p>
+      <ul>
+        <li><code>final_model.pt</code> -- the trained weights.</li>
+        <li><code>recipe.tar.gz</code> -- the training setup that the model expects inputs to be preprocessed with.</li>
+        <li><code>inference_script.py</code> -- a standalone script that applies the recipe and runs inference.</li>
+        <li><code>requirements.txt</code> -- pinned package versions matching the environment the model was trained
+          under.</li>
+      </ul>
+      <p>After unzipping, it is recommended to set up a python environment and run it:</p>
+      <pre
+        style="background: var(--bg-alt, #1e1e1e); color: inherit; padding: 10px 12px; border-radius: var(--radius-sm); overflow-x: auto; font-size: 0.85rem;"><code>pip install -r requirements.txt
+
+python inference_script.py \
+    --recipe recipe.tar.gz \
+    --checkpoint final_model.pt \
+    --input /path/to/case.nii.gz \
+    --output-dir ./predictions</code></pre>
+      <p><code>--input</code> can also be a folder of <code>*.nii.gz</code> files. Each result is written as
+        <code>&lt;output-dir&gt;/&lt;case&gt;_seg.nii.gz</code>, an integer label map resampled back to the input's
+        original geometry --
+        what each label number means isn't stored in the model or recipe, so confirm that with whoever ran the training
+        job.
+      </p>
+    </div>
+
+    <div class="howto-step">
+      <h3><span class="step-num">5</span> Follow training (optional)</h3>
+      <p>Each training site writes a log to
+        <code>airflow/data/workflows/fl-segresnet/&lt;run_id&gt;/local/round_&lt;n&gt;/local-output/segresnet_ckpt/training.log</code>.
+        <code>loss</code> should go down; <code>acc</code> is the Dice score per class (0-1, higher is better).
+      </p>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

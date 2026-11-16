@@ -1,0 +1,41 @@
+{# app/templates/logged_out.html #}
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .logout-lead { color: #bbb; font-size: 0.95rem; line-height: 1.7; margin: 0 0 22px; }
+  .logout-note {
+    margin-top: 26px; padding-top: 20px; border-top: 1px solid #2f2f2f;
+    color: var(--text-muted); font-size: 0.84rem; line-height: 1.7;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+  <div class="page-header">
+    <div class="icon-badge"><i class="fa-solid fa-right-from-bracket"></i></div>
+    <div>
+      <h2>You have been logged out</h2>
+      <p class="page-sub">Your session has ended successfully.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><i class="fa-solid fa-lock"></i> Session closed</h3>
+    <p class="logout-lead">
+      Your single sign-on session and this app's cookies have been cleared. Log in
+      again to get back to the viewer and the rest of the tools.
+    </p>
+
+    <a href="{{ url_for('auth.force_login') }}" class="btn btn-primary">
+      <i class="fa-solid fa-right-to-bracket"></i> Log in again
+    </a>
+
+    <p class="logout-note">
+      If you are on a shared workstation, close the browser as well - that clears
+      anything Keycloak still holds in this browser session.
+    </p>
+  </div>
+</div>
+{% endblock %}

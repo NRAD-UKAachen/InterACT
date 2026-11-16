@@ -1,0 +1,73 @@
+{# app/templates/home.html #}
+{% extends 'base.html' %}
+
+{% block head %}
+<style>
+  /* Reports list rows and the logged-out hint - the card, buttons, inputs and
+     hint text all come from static/style.css. */
+  .report-form { display: flex; gap: 8px; }
+  .report-form input[type="text"] { flex: 1; }
+  .well a { color: var(--success); }
+  .reports-list { display: flex; flex-direction: column; gap: 8px; }
+  .well--row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 0.9rem;
+    margin: 0;
+  }
+  .report-meta { color: var(--muted, #888); font-size: 0.8rem; white-space: nowrap; }
+</style>
+{% endblock %}
+
+{%- block content -%}
+<div class="page-container">
+  <div class="page-header">
+    <div class="icon-badge"><i class="fa-solid fa-house"></i></div>
+    <div>
+      <h2>Welcome to InterACT</h2>
+      <p class="page-sub">Imaging tools for the department, all in one place.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3><i class="fa-solid fa-bug"></i> Report Bugs</h3>
+    {% if user %}
+      <form class="report-form" method="POST">
+        <input type="text" name="message" placeholder="Type your message here" required>
+        <button type="submit" class="btn btn-primary"><i class="fa-solid fa-paper-plane"></i> Post</button>
+      </form>
+    {% else %}
+      <div class="well">
+        Please <a href="{{ url_for('auth.login', next=url_for('home.home')) }}">log in</a> to post a report.
+      </div>
+    {% endif %}
+
+    <h4>{% if is_admin %}All reports{% else %}Your reports{% endif %}</h4>
+    <div class="reports-list">
+      {% for report in reports %}
+        <div class="well well--row">
+          <span>
+            {{ report.message }}
+            {% if is_admin %}
+              <span class="report-meta">
+                &mdash; {{ report.username or 'unknown' }}{% if report.created %}, {{ report.created.replace('T', ' ') }}{% endif %}
+              </span>
+            {% elif report.created %}
+              <span class="report-meta">&mdash; {{ report.created.replace('T', ' ') }}</span>
+            {% endif %}
+          </span>
+          <form action="{{ url_for('home.delete_report', report_id=report.id) }}" method="POST">
+            <button type="submit" class="icon-btn danger" title="Delete this report" onclick="return confirm('Delete this report?')">
+              <i class="fa-solid fa-trash"></i>
+            </button>
+          </form>
+        </div>
+      {% else %}
+        <p class="hint">No reports yet.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{%- endblock -%}

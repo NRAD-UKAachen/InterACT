@@ -1,0 +1,27 @@
+# OHIF Medical Imaging API Requirements
+
+# Core Flask dependencies
+Flask>=2.3.0
+flask-cors>=4.0.0
+requests>=2.31.0
+
+# DICOM and medical imaging
+SimpleITK>=2.2.0
+numpy>=1.24.0
+pydicom>=2.4.0
+dicomweb-client>=0.59.0
+
+# LDCT specific requirements (from ldct service)
+astra-toolbox>=2.1.0
+scipy>=1.10.0
+scikit-image>=0.20.0
+tqdm>=4.65.0
+nibabel>=5.0.0
+matplotlib>=3.7.0
+
+# Optional: For better performance
+gunicorn>=21.0.0  # Production WSGI server
+
+# Development dependencies
+pytest>=7.4.0
+pytest-cov>=4.1.0

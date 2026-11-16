@@ -1,0 +1,24 @@
+# Ignore specific directories
+Backup/
+LDCT_Sim/
+Data/
+cpu_out/
+Simulated/
+# Ignore installer scripts
+Miniconda3-latest-Linux-x86_64.sh
+Miniconda3-latest-Linux-x86_64.sh.1
+
+# Ignore specific script you don't want in Git
+Allstepy.py
+Medical Physics - 2024 - Alsaihati - Development validation and application of a generic image‐based noise addition.pdf
+val.py
+plot6.py
+step4.py
+runacode.py
+pyproject.toml
+config.default.yaml
+
+# Compiled from the .py sources on every container run -- shows up as
+# permanent "untracked content" in any repo with this checked out otherwise.
+__pycache__/
+*.pyc

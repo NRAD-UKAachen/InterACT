@@ -1,0 +1,1405 @@
+/* app/static/style.css
+ *
+ * The single stylesheet for the InterACT GUI. Every page we render - the
+ * shell itself and every frame loaded into a nav slot with ?embedded=1 -
+ * inherits from this file, so the app has one place where the palette, the
+ * sidebar chrome and the shared components are defined.
+ *
+ * The only pages NOT covered are the ones we don't own: the OHIF viewer and
+ * the dcm4chee admin UI, which are third-party apps served from their own
+ * origins and iframed in as-is.
+ *
+ * Templates that extend base.html get this automatically. A standalone
+ * template must link it itself:
+ *   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+ */
+
+/* ------------------------------------------------------------------ *
+ * Design tokens
+ * ------------------------------------------------------------------ */
+:root {
+    --green: #669900;
+    --green-dark: #567f00;
+
+    /* One black for every surface behind content: the document, the
+       content column and the header strip all share it, so a frame looks
+       identical whether it is loaded on its own or inside a nav slot. */
+    --page-bg: #000000;
+    --content-bg: #000000;
+    --header-bg: #000000;
+
+    /* Raised surfaces sit on top of that black. */
+    --card-bg: #262626;      /* panels, cards, modals */
+    --surface-2: #1f1f1f;    /* a panel nested inside a card */
+    --surface-1: #1a1a1a;    /* inset: text inputs, code, wells */
+    --surface-hover: #3a3a3a;
+
+    --border: #333333;
+    --border-soft: #2a2a2a;  /* table row separators */
+    --border-strong: #3a3a3a;
+
+    --text: #FFFFFF;
+    --text-dim: #cccccc;
+    --text-muted: #999999;
+    --text-faint: #888888;
+
+    /* Semantic accents. Every frame drew these slightly differently before;
+       these are the one set they all now share. */
+    --info: #6ab0e6;
+    --info-bg: rgba(52, 152, 219, 0.18);
+    --success: #a9d75c;
+    --success-bg: rgba(102, 153, 0, 0.25);
+    --warn: #e0a640;
+    --warn-bg: rgba(243, 156, 18, 0.18);
+    --danger: #e74c3c;
+    --danger-bg: rgba(231, 76, 60, 0.18);
+
+    --radius: 12px;
+    --radius-sm: 8px;
+    --radius-pill: 20px;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+/* ------------------------------------------------------------------ *
+ * Document
+ * ------------------------------------------------------------------ */
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+}
+
+body {
+    background: var(--page-bg);
+    color: var(--text);
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    text-align: center;
+}
+
+/* ------------------------------------------------------------------ *
+ * App shell: sidebar
+ * ------------------------------------------------------------------ */
+.sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 240px;
+    background: var(--green);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.sidebar-brand {
+    padding: 20px 20px 10px;
+    font-size: 1.3rem;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+.sidebar-nav {
+    flex: 1;
+    overflow-y: auto;
+}
+.sidebar-nav ul {
+    list-style: none;
+    margin: 0;
+    padding: 8px 12px;
+}
+.sidebar-nav li {
+    border-bottom: none;
+}
+.sidebar-nav a {
+    display: block;
+    position: relative;
+    padding: 12px 14px 12px 44px;
+    margin-bottom: 2px;
+    border-radius: 10px;
+    color: #FFF;
+    text-decoration: none;
+    text-align: left;
+    transition: background 0.15s ease;
+}
+.sidebar-nav a i {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    text-align: center;
+}
+.sidebar-nav a:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+.sidebar-nav li.active > a {
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--green-dark);
+    font-weight: 600;
+}
+
+.sidebar-nav .submenu {
+    display: none;
+    background: transparent;
+    padding: 0;
+    margin-top: 2px;
+}
+.sidebar-nav .submenu li {
+    border: none;
+}
+.sidebar-nav .submenu a {
+    padding: 8px 14px 8px 34px;
+    margin-bottom: 0;
+    font-size: 0.9rem;
+}
+
+.sidebar-nav .has-children > a {
+    padding-right: 34px;
+}
+.sidebar-nav .has-children > a:after {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    content: "\f0da";
+    font-family: "Font Awesome 5 Free";
+    font-weight: 900;
+}
+.sidebar-nav .has-children.expanded > a:after {
+    content: "\f0d7";
+}
+.sidebar-nav .has-children.expanded > .submenu {
+    display: block;
+}
+/* A submenu nested inside another submenu (e.g. Screw Segmentation under
+   Research Tools) needs its own deeper indent, or it reads as a sibling
+   of the outer submenu's items instead of a child. */
+.sidebar-nav .submenu .submenu a {
+    padding-left: 50px;
+}
+.sidebar-nav .submenu .has-children > a:after {
+    right: 14px;
+}
+
+.sidebar-footer {
+    flex-shrink: 0;
+    padding: 16px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.25);
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px 12px;
+}
+.sidebar-footer .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #FFF;
+    color: var(--green-dark);
+    font-weight: bold;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.sidebar-footer .user-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.sidebar-footer a {
+    color: #FFF;
+    text-decoration: none;
+    font-size: 0.85rem;
+    opacity: 0.85;
+    flex-shrink: 0;
+}
+.sidebar-footer a:hover {
+    opacity: 1;
+    text-decoration: underline;
+}
+
+.sidebar-footer .user-menu {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+}
+.sidebar-footer .user-menu-trigger {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    color: #FFF;
+    font: inherit;
+    text-align: left;
+}
+.sidebar-footer .user-menu-trigger .avatar {
+    transition: box-shadow 0.15s ease;
+}
+.sidebar-footer .user-menu.open .user-menu-trigger .avatar {
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6);
+}
+.sidebar-footer .user-menu-popup {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 0;
+    min-width: 190px;
+    background: #FFF;
+    color: var(--green-dark);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    overflow: hidden;
+    z-index: 20;
+}
+.sidebar-footer .user-menu.open .user-menu-popup {
+    display: block;
+}
+.sidebar-footer .user-menu-role {
+    padding: 10px 14px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--green-dark);
+    opacity: 0.65;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.sidebar-footer .user-menu-popup a {
+    display: block;
+    padding: 10px 14px;
+    color: var(--green-dark);
+    opacity: 1;
+    font-size: 0.9rem;
+}
+.sidebar-footer .user-menu-popup a:hover {
+    background: rgba(0, 0, 0, 0.06);
+    text-decoration: none;
+}
+
+/* ------------------------------------------------------------------ *
+ * App shell: content column
+ * ------------------------------------------------------------------ */
+.main-content {
+    margin-left: 240px;
+    width: calc(100% - 240px);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--content-bg);
+    overflow: hidden;
+}
+
+.page-body {
+    position: relative;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
+    background: var(--content-bg);
+}
+
+/* Embedded mode (e.g. iframed inside a nav slot or the OHIF viewer side
+   panel): hide the sidebar chrome and let the page content fill the frame. */
+body.embedded .main-content {
+    margin: 0;
+    width: 100%;
+}
+
+/* Client-side nav shell: every sidebar destination gets its own iframe
+   "slot", created once on first visit and only ever hidden/shown again
+   afterwards - never destroyed. That's what keeps each page's state
+   (e.g. an opened patient in OHIF) intact when you switch to another
+   menu item and back. Only one slot is visible at a time. */
+#page-slot, .nav-slot {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+}
+.nav-slot {
+    display: none;
+}
+.nav-slot iframe {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+    /* Frames we own inherit this same file and paint their own black; the
+       token keeps the gap black too while one is still loading. */
+    background: var(--page-bg);
+}
+
+/* Shared page-header used at the top of every content page: an icon
+   badge plus a title/subtitle, so every page reads as part of the same
+   app instead of each picking its own heading style. */
+.page-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 18px;
+}
+.page-header .icon-badge {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--green), var(--green-dark));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 18px;
+    box-shadow: 0 4px 14px rgba(102, 153, 0, 0.35);
+}
+.page-header h2 {
+    color: #fff;
+    margin: 0 0 4px;
+    font-size: 1.25rem;
+    letter-spacing: -0.01em;
+}
+.page-header .page-sub {
+    color: var(--text-muted);
+    font-size: 12.5px;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------------ *
+ * Titles
+ * ------------------------------------------------------------------ */
+h1 {
+    color: #FFFFFF;
+    font-size: 4em;
+    margin-bottom: 40px;
+    position: fixed;
+    top: 0px;
+    left: 50px;
+}
+h1 a {
+    color: #FFFFFF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+h1 a:hover {
+    color: var(--green);
+    text-decoration: none;
+}
+h2 {
+    color: #FFFFFF;
+    font-size: 3em;
+    margin-bottom: 40px;
+    margin-top: 10px;
+}
+
+/* ------------------------------------------------------------------ *
+ * Alerts
+ * ------------------------------------------------------------------ */
+.alert {
+    padding: 10px 15px;
+    margin-bottom: 15px;
+    border-radius: 4px;
+}
+.alert-danger { background-color: #e74c3c; }
+.alert-success { background-color: #2ecc71; }
+.alert-warning { background-color: #f39c12; }
+
+/* ------------------------------------------------------------------ *
+ * Buttons
+ * ------------------------------------------------------------------ */
+.button-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
+    margin-top: 100px;
+}
+.button {
+    background-color: var(--green);
+    color: #FFFFFF;
+    font-size: 1.5em;
+    padding: 120px 10px;
+    width: 300px;
+    height: 300px;
+    text-align: center;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+.button:hover {
+    background-color: #8EBAE5;
+}
+
+/* ------------------------------------------------------------------ *
+ * Images
+ * ------------------------------------------------------------------ */
+.responsive-img {
+    max-width: 100%;
+    height: auto;
+    border: 4px solid var(--green);
+    border-radius: 10px;
+    margin-bottom: 0px;
+    margin-top: 20px;
+}
+
+/* ------------------------------------------------------------------ *
+ * Linked words
+ * ------------------------------------------------------------------ */
+.linked-word {
+    color: #FFFFFF;
+}
+.linked-word:hover {
+    color: var(--green);
+}
+
+/* ------------------------------------------------------------------ *
+ * List entries
+ * ------------------------------------------------------------------ */
+.list-container {
+    display: flex;
+    flex-direction: column;
+    justify-content: left;
+    color: #ffffff;
+}
+.list-container h3 {
+    font-size: 1.8em;
+    margin-bottom: 0px;
+    margin-top: 50px;
+    text-align: left;
+}
+.list-container p {
+    margin-bottom: 3px;
+    margin-top: 3px;
+}
+.list-entry {
+    color: #FFFFFF;
+    font-size: 1.5em;
+    padding: 20px;
+    text-align: left;
+    cursor: pointer;
+}
+.list-entry:hover {
+    color: var(--green);
+    font-size: 1.5em;
+    padding: 20px;
+    text-align: left;
+    cursor: pointer;
+}
+.list-entry-clean {
+    color: #FFFFFF;
+    font-size: 1.5em;
+    padding: 10px;
+    text-align: left;
+}
+
+/* ------------------------------------------------------------------ *
+ * Notepad
+ * ------------------------------------------------------------------ */
+.notepad-wrapper {
+    display: flex;
+    justify-content: space-evenly;
+    gap: 30px;
+    width: 100%;
+}
+.notepad-container {
+    background-color: var(--card-bg);
+    color: #FFFFFF;
+    padding: 20px;
+    border-radius: 10px;
+    margin-top: 20px;
+    margin-bottom: 20px;
+    width: 45%;
+    max-width: 600px;
+    text-align: left;
+    margin-left: auto;
+    margin-right: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: top;
+}
+.notepad-container h2 {
+    margin-bottom: 20px;
+    font-size: 1.6em;
+}
+.notepad-container h3 {
+    margin-bottom: 10px;
+    margin-top: 10px;
+}
+.message {
+    background-color: #555555;
+    border-radius: 5px;
+    padding: 10px;
+    margin: 5px 0;
+}
+.notepad-form input[type="text"] {
+    padding: 10px;
+    width: 80%;
+    border: none;
+    border-radius: 5px;
+    margin-right: 5px;
+    margin-bottom: 10px;
+}
+.notepad-form input[type="number"] {
+    padding: 10px;
+    width: 40%;
+    border: none;
+    border-radius: 5px;
+    margin-right: 5px;
+    margin-bottom: 10px;
+}
+.notepad-form select {
+    padding: 10px;
+    width: 80%;
+    border: none;
+    border-radius: 5px;
+    margin-right: 5px;
+    margin-bottom: 10px;
+}
+.notepad-form button {
+    padding: 10px 20px;
+    margin-bottom: 10px;
+    background-color: var(--green);
+    color: #FFFFFF;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ *
+ * Questionnaire
+ * ------------------------------------------------------------------ */
+.question-container {
+    background-color: var(--card-bg);
+    color: #FFFFFF;
+    padding: 20px;
+    border-radius: 10px;
+    margin-top: 20px;
+    width: 100%;
+    max-width: 1000px;
+    text-align: left;
+    margin-left: auto;
+    margin-right: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: top;
+}
+.question-container h2 {
+    margin-bottom: 20px;
+}
+.question-container h3 {
+    margin-bottom: 0px;
+    margin-top: 20px;
+    font-size: 2.0em;
+}
+.question-container p {
+    margin-top: 5px;
+    font-size: 1.6em;
+}
+.question button {
+    padding: 10px 20px;
+    margin-bottom: 10px;
+    background-color: var(--card-bg);
+    border: 4px solid var(--green);
+    color: #FFFFFF;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 1.4em;
+    transition: color 0.3s ease;
+}
+.question button:hover {
+    border-color: #8EBAE5;
+}
+
+/* ------------------------------------------------------------------ *
+ * Emoji links / home button
+ * ------------------------------------------------------------------ */
+.emoji-link {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    font-size: 50px;
+    cursor: pointer;
+    text-decoration: none;
+}
+.emoji-link:nth-of-type(2) {
+    bottom: 80px;
+}
+.emoji-link i {
+    color: #FFFFFF;
+    transition: color 0.3s ease;
+}
+.emoji-link i:hover {
+    color: var(--green);
+}
+.home-button {
+    position: fixed;
+    top: 50px;
+    left: 20px;
+    font-size: 50px;
+    cursor: pointer;
+    text-decoration: none;
+    color: #FFFFFF;
+    transition: color 0.3s ease;
+}
+.home-button:hover {
+    color: var(--green);
+}
+
+/* ------------------------------------------------------------------ *
+ * Search
+ * ------------------------------------------------------------------ */
+.search-bar {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    gap: 10px;
+}
+.search-bar input {
+    padding: 10px;
+    border: none;
+    border-radius: 5px;
+    width: 200px;
+}
+.search-bar button {
+    padding: 10px 20px;
+    background-color: var(--green);
+    color: #FFFFFF;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.search-container {
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+}
+.search-container input[type="text"] {
+    padding: 5px 10px;
+    border-radius: 4px;
+    border: none;
+    width: 200px;
+}
+.search-container button {
+    margin-left: 8px;
+    padding: 6px 12px;
+    background: #A3C644;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ *
+ * Forms
+ * ------------------------------------------------------------------ */
+.form-grid {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    row-gap: 5px;
+    column-gap: 10px;
+    align-items: center;
+}
+
+/* ------------------------------------------------------------------ *
+ * Toast
+ * ------------------------------------------------------------------ */
+.toast {
+    position: absolute;
+    background-color: #ff4444;
+    color: white;
+    width: 100%;
+    padding: 15px 20px;
+    border-radius: 8px;
+    box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.2);
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+}
+.toast.show {
+    opacity: 1;
+}
+
+/* ------------------------------------------------------------------ *
+ * Code
+ * ------------------------------------------------------------------ */
+code {
+    font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+    background-color: #2e3440;
+    color: #d8dee9;
+    padding: 0.1em 0.2em;
+    border-radius: 4px;
+    font-size: 0.8em;
+}
+
+.code-block {
+    position: relative;
+}
+.copy-button {
+    position: absolute;
+    top: 2em;
+    right: 2em;
+    background-color: #4c566a;
+    color: #eceff4;
+    border: none;
+    border-radius: 4px;
+    padding: 0.3em 0.6em;
+    font-size: 0.8em;
+    cursor: pointer;
+    opacity: 0.8;
+    transition: opacity 0.2s ease;
+}
+.copy-button:hover {
+    opacity: 1;
+}
+pre {
+    background-color: #2e3440;
+    color: #d8dee9;
+    padding: 1em;
+    border-radius: 8px;
+    border: none;
+    overflow-x: auto;
+    font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+    font-size: 0.95em;
+    line-height: 1.5;
+    margin: 0.1em 0;
+    margin-bottom: 1em;
+    text-align: left;
+}
+pre code {
+    background: none;
+    color: inherit;
+    padding: 0;
+    border-radius: 0;
+    font-size: inherit;
+}
+
+/* ------------------------------------------------------------------ *
+ * Full canvas for iframes
+ * ------------------------------------------------------------------ */
+.full-canvas {
+    width: 100%;
+    height: 100%;
+    border: none;
+    min-height: calc(100vh - 70px); /* topbar height plus some padding */
+    background: var(--page-bg);
+    display: block;
+}
+
+/* ------------------------------------------------------------------ *
+ * Adjustments to accommodate screen size
+ * ------------------------------------------------------------------ */
+@media (max-width: 1000px) {
+    h1 {
+        font-size: 2.5em;
+        left: 20px;
+    }
+
+    .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .notepad-form input,
+    .notepad-form select {
+        margin-right: 0;
+    }
+}
+
+
+/* ==================================================================== *
+ *  FRAME COMPONENTS
+ *
+ *  Everything below used to be copy-pasted into each frame's own <style>
+ *  block, which is how the app ended up with three competing looks: a
+ *  modern dark one (iRODS, batch, audit), a blue "flatly" one
+ *  (#2c3e50/#3498db, in the workflow and FSL pages) and a leftover
+ *  Bootstrap-light one (white panels, in the diagnostics pages).
+ *
+ *  There is now exactly one name per thing. A frame that wants a variant
+ *  adds a modifier next to the base class rather than inventing its own
+ *  name, so `.page-container--wide` is a wide `.page-container` and not a
+ *  separate `.audit-container`:
+ *
+ *      <div class="page-container page-container--wide">
+ *      <div class="card card--flush">
+ *      <button class="btn btn-primary">
+ *
+ *  The one exception is the state names further down (.badge-success,
+ *  .flash-error, .sys-irods, ...). Those look like duplicates but are
+ *  not interchangeable: templates build them from data - class="badge
+ *  sys-{{ event.system }}" - so the name has to match the value, and
+ *  they are grouped into lookup tables instead of being merged.
+ * ==================================================================== */
+
+/* -------------------------------------------------------------------- *
+ * Page container - the padded, max-width column a frame's content sits in
+ * -------------------------------------------------------------------- */
+.page-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 28px 32px;
+    /* The shell centres text for the legacy pages; frames read left. */
+    text-align: left;
+}
+.page-container--narrow { max-width: 800px; }
+.page-container--medium { max-width: 980px; padding-bottom: 60px; }
+.page-container--wide   { max-width: 1500px; }
+.page-container--top-gap { padding-top: 48px; }
+
+/* -------------------------------------------------------------------- *
+ * Card - the standard raised panel
+ * -------------------------------------------------------------------- */
+.card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    margin-bottom: 22px;
+}
+/* A card whose content is a flush table or iframe manages its own padding. */
+.card--flush   { padding: 0; overflow: hidden; position: relative; }
+.card--compact { padding: 16px 20px; }
+.card--roomy   { padding: 32px 34px; }
+
+/* A card used as a one-line panel. display lives under :not([hidden]) so an
+   unqualified author rule cannot beat the UA's [hidden] { display: none }. */
+.card--inline:not([hidden]) { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+.card h2,
+.card h3 {
+    margin: 0 0 14px;
+    font-size: 1.05rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text);
+    border-bottom: none;
+    letter-spacing: normal;
+}
+.card h4 {
+    margin: 22px 0 10px;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+}
+.card-header { padding: 18px 22px 4px; }
+.card-header h3 { margin: 0 0 6px; }
+.card-body { padding: 0 22px 22px; }
+
+/* -------------------------------------------------------------------- *
+ * Buttons - one shape (pill), one name per variant
+ * -------------------------------------------------------------------- */
+.btn {
+    border: none;
+    border-radius: var(--radius-pill);
+    padding: 9px 18px;
+    font-size: 0.88rem;
+    font-family: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    white-space: nowrap;
+    background: var(--surface-hover);
+    color: var(--text);
+    transition: background 0.15s ease, filter 0.12s ease;
+}
+.btn:hover { background: #474747; color: var(--text); text-decoration: none; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary          { background: var(--green); color: #fff; font-weight: 600; }
+.btn-primary:hover    { background: var(--green-dark); color: #fff; }
+.btn-secondary        { background: var(--surface-hover); color: var(--text); font-weight: 500; }
+.btn-secondary:hover  { background: #474747; }
+.btn-ghost            { background: transparent; color: #b0b0b0; }
+.btn-ghost:hover      { background: transparent; color: var(--text); }
+.btn-success          { background: #2f8f4e; color: #fff; font-weight: 600; }
+.btn-success:hover    { background: #27753f; }
+.btn-danger           { background: #b23325; color: #fff; font-weight: 600; }
+.btn-danger:hover     { background: #92291e; }
+.btn-warning          { background: #b9791f; color: #fff; font-weight: 600; }
+.btn-warning:hover    { background: #99631a; }
+
+/* A row of buttons. */
+.actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 22px;
+}
+.actions--end { justify-content: flex-end; }
+
+/* Icon-only button, for table-row actions. */
+.icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-decoration: none;
+    flex-shrink: 0;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.icon-btn:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+.icon-btn.danger:hover { background: rgba(231, 76, 60, 0.15); color: var(--danger); }
+.icon-btn.share-btn:hover { background: rgba(102, 153, 0, 0.18); color: var(--success); }
+
+/* -------------------------------------------------------------------- *
+ * Form controls
+ * -------------------------------------------------------------------- */
+.form-group { margin-bottom: 18px; }
+.form-group label,
+.filter-field label,
+.field-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-faint);
+    font-weight: 600;
+}
+
+/* Every text-ish control inside a frame gets the same treatment. Scoping to
+   .page-container is what replaced the old per-wrapper selectors
+   (.inline-panel input, .filter-field select, .report-form input, ...) -
+   one rule instead of a dozen, and it leaves the shell's own controls and
+   the MONAI toolbar (which is not a .page-container) alone. */
+.form-control,
+.page-container input[type="text"],
+.page-container input[type="number"],
+.page-container input[type="password"],
+.page-container input[type="date"],
+.page-container input[type="search"],
+.page-container input[type="email"],
+.page-container select,
+.page-container textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 9px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--surface-1);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.92rem;
+}
+.form-control:focus,
+.page-container input:focus,
+.page-container select:focus,
+.page-container textarea:focus { outline: none; border-color: var(--green); }
+
+.form-control--file,
+.page-container input[type="file"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    border: 2px dashed var(--border-strong);
+    background: var(--surface-1);
+    color: var(--text);
+    font-family: inherit;
+    cursor: pointer;
+}
+.form-control--file:hover,
+.page-container input[type="file"]:hover { border-color: var(--green); }
+
+/* Tick boxes size themselves; only the text controls above stretch. */
+.page-container input[type="checkbox"],
+.page-container input[type="radio"] { width: auto; margin-right: 10px; }
+.page-container input[type="range"] { width: auto; }
+
+.checkbox-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.checkbox-group label {
+    margin-bottom: 0;
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    font-weight: 400;
+}
+
+/* A form laid out as one wrapping row rather than stacked fields. */
+.inline-form {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+}
+.inline-form .form-group { flex: 1; margin-bottom: 0; }
+.filter-field { display: flex; flex-direction: column; gap: 6px; min-width: 150px; }
+.filter-field.grow { flex: 1; min-width: 240px; }
+
+/* -------------------------------------------------------------------- *
+ * Secondary text
+ * -------------------------------------------------------------------- */
+.hint {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    line-height: 1.6;
+    margin: 0 0 16px;
+}
+.hint code {
+    background: var(--surface-1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.92em;
+}
+
+/* -------------------------------------------------------------------- *
+ * Tables
+ * -------------------------------------------------------------------- */
+table,
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.86rem;
+}
+th {
+    text-align: left;
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-faint);
+    font-weight: 600;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    white-space: nowrap;
+}
+td {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--border-soft);
+    vertical-align: top;
+    color: var(--text-dim);
+}
+tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: rgba(255, 255, 255, 0.03); }
+
+/* A key/value table: narrow label column, monospace value. */
+.data-table--meta td:first-child { color: var(--text-muted); width: 200px; }
+.data-table--meta td:last-child { font-family: monospace; word-break: break-all; }
+
+.table-wrap { overflow-x: auto; }
+.col-actions { text-align: right; white-space: nowrap; }
+
+/* -------------------------------------------------------------------- *
+ * Inset well - a surface nested inside a card
+ * -------------------------------------------------------------------- */
+.well {
+    background: var(--surface-2);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    color: var(--text-dim);
+}
+/* Monospace output: command results, log dumps, config listings. */
+.well--output {
+    font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    max-height: 500px;
+    overflow-y: auto;
+}
+/* One row in a list of wells. */
+.well--row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+/* A pickable option. */
+.well--option {
+    flex: 1;
+    min-width: 220px;
+    border: 2px solid var(--border);
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+}
+.well--option:hover { border-color: #555; }
+.well--option.selected { border-color: var(--green); background: rgba(102, 153, 0, 0.08); }
+.well--option.disabled { opacity: 0.5; cursor: not-allowed; }
+/* A single headline number. */
+.well--stat { text-align: center; }
+.well--stat .value { font-size: 1.8rem; font-weight: bold; color: var(--success); }
+.well--stat .label { font-size: 0.85rem; color: var(--text-muted); margin-top: 5px; }
+/* A tile in a grid of links. */
+.well--tile { flex: 1; min-width: 280px; max-width: 400px; }
+
+/* -------------------------------------------------------------------- *
+ * Badges
+ * -------------------------------------------------------------------- */
+/* display lives under :not([hidden]), same as .card--inline and
+   .modal-overlay above: an unqualified "display: inline-block" here is an
+   author rule and so beats the UA's [hidden] { display: none } on a tie. */
+.badge:not([hidden]) {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    white-space: nowrap;
+    background: var(--surface-hover);
+    color: var(--text-dim);
+}
+
+/* Badge colours, keyed by the value a template interpolates into the class
+   name - class="badge badge-{{ st }}", class="badge sys-{{ event.system }}".
+   The names are data, not styling choices, so they stay distinct even where
+   two of them resolve to the same colour. */
+.badge-info,
+.badge-running,
+.badge-write,
+.badge-admin,
+.sys-dcm4chee,
+.sys-pacs           { background: var(--info-bg); color: var(--info); }
+
+.badge-success,
+.badge-own,
+.badge-online,
+.badge-current      { background: var(--success-bg); color: var(--success); }
+
+.badge-warning,
+.badge-warn,
+.badge-queued       { background: var(--warn-bg); color: var(--warn); }
+
+.badge-danger,
+.badge-failed,
+.badge-offline      { background: var(--danger-bg); color: var(--danger); }
+
+.badge-groupadmin,
+.badge-submitted    { background: rgba(155, 89, 182, 0.2); color: #c39bd3; }
+
+.sys-irods          { background: rgba(155, 89, 182, 0.18); color: #c39bd3; }
+.sys-api            { background: rgba(26, 188, 156, 0.18); color: #5fd3bc; }
+.sys-audit          { background: var(--surface-hover); color: var(--text-dim); }
+
+.badge-neutral,
+.badge-user,
+.badge-soon,
+.badge-unknown      { background: var(--surface-hover); color: var(--text-muted); }
+
+/* Job states, set on a badge from JS: class="badge ${state}". */
+.badge.pending,
+.badge.skipped      { background: var(--surface-hover); color: var(--text-muted); }
+.badge.running      { background: var(--info-bg); color: var(--info); }
+.badge.done         { background: var(--success-bg); color: var(--success); }
+.badge.partial      { background: var(--warn-bg); color: var(--warn); }
+.badge.failed       { background: var(--danger-bg); color: var(--danger); }
+
+/* -------------------------------------------------------------------- *
+ * Status dot - a coloured circle before a label
+ * -------------------------------------------------------------------- */
+.status-indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+/* Keyed by data the same way the badges are: 'status-' + data.status. */
+.status-success,
+.status-installed,
+.status-indicator.healthy   { background: #2f8f4e; }
+.status-warning,
+.status-unknown             { background: var(--warn); }
+.status-error,
+.status-not-installed,
+.status-indicator.unhealthy { background: var(--danger); }
+.status-pending             { background: var(--info); }
+
+/* Audit-log outcome text. */
+.out-success { color: var(--success); }
+.out-denied  { color: var(--danger); font-weight: 600; }
+.out-error   { color: var(--warn); }
+
+/* -------------------------------------------------------------------- *
+ * Messages - flashes, banners and inline status lines
+ * -------------------------------------------------------------------- */
+.flashes {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.flashes li,
+.status-msg,
+.info-box,
+.success-banner {
+    padding: 11px 16px;
+    border-radius: 9px;
+    font-size: 0.88rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    line-height: 1.45;
+    border: 1px solid transparent;
+}
+/* Keyed by the flash category / status type a template interpolates. */
+.flash-success,
+.status-loading,
+.success-banner     { background: rgba(46, 204, 113, 0.12); color: #7de8a4; border-color: rgba(46, 204, 113, 0.3); }
+.flash-error,
+.status-error       { background: rgba(224, 86, 74, 0.12); color: #ff9a8f; border-color: rgba(224, 86, 74, 0.3); }
+.flash-warning      { background: rgba(243, 156, 18, 0.12); color: #ffc670; border-color: rgba(243, 156, 18, 0.3); }
+.flash-info,
+.status-info,
+.info-box           { background: rgba(52, 152, 219, 0.12); color: #85c6ff; border-color: rgba(52, 152, 219, 0.3); }
+
+/* -------------------------------------------------------------------- *
+ * Empty state
+ * -------------------------------------------------------------------- */
+.empty-state {
+    padding: 48px 24px;
+    text-align: center;
+    color: var(--text-faint);
+}
+.empty-state i {
+    font-size: 1.9rem;
+    display: block;
+    margin-bottom: 12px;
+    color: #555;
+}
+
+/* -------------------------------------------------------------------- *
+ * Progress bar
+ * -------------------------------------------------------------------- */
+.progress-bar-track {
+    height: 10px;
+    border-radius: 6px;
+    background: var(--border);
+    overflow: hidden;
+    margin-bottom: 18px;
+    display: flex;
+}
+.progress-bar-fill {
+    height: 100%;
+    background: var(--green);
+    transition: width 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.progress-bar-fill.failed-fill,
+.progress-bar-fill.failed { background: var(--danger); }
+
+/* -------------------------------------------------------------------- *
+ * Modal
+ * -------------------------------------------------------------------- */
+/* display must live under :not([hidden]): an unqualified "display: flex"
+   here is an author rule and so beats the UA's [hidden] { display: none },
+   which would make a dialog ignore its hidden attribute entirely. */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 100;
+}
+.modal-overlay:not([hidden]) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.modal-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px 26px;
+    width: 420px;
+    max-width: calc(100vw - 40px);
+    margin-bottom: 0;
+    text-align: left;
+}
+.modal-card h3 { margin: 0 0 4px; }
+.modal-form { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.modal-form label {
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* -------------------------------------------------------------------- *
+ * Tabs
+ * -------------------------------------------------------------------- */
+.tab-container {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 22px;
+    border-bottom: none;
+    flex-wrap: wrap;
+    position: relative;
+}
+.tab-btn,
+.tab-container a {
+    background: transparent;
+    border: none;
+    color: #b0b0b0;
+    text-decoration: none;
+    font-size: 0.92rem;
+    font-family: inherit;
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    position: relative;
+}
+.tab-btn:hover,
+.tab-container a:hover { background: rgba(255, 255, 255, 0.06); color: var(--text); }
+.tab-btn.active,
+.tab-container a.active { background: var(--card-bg); color: var(--text); font-weight: 600; }
+
+.tab-content { display: none; padding: 0; background: transparent; }
+.tab-content.active { display: block; }
+
+/* -------------------------------------------------------------------- *
+ * Layout helpers
+ * -------------------------------------------------------------------- */
+.row { display: flex; gap: 20px; flex-wrap: wrap; }
+.col-6 { flex: 1; min-width: 300px; }
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 15px;
+    margin: 20px 0;
+}
+
+/* Pages whose whole body is one iframe or canvas. */
+.page-body--flush {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+}

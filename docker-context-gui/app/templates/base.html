@@ -1,0 +1,268 @@
+<!-- app/templates/base.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title or "InterACT" }}</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" type="image/x-icon">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/css/all.min.css') }}">
+  <script>
+    // This deployment's public URLs, injected by create_app's
+    // inject_public_urls context processor from PUBLIC_HOST in the root .env.
+    // Declared here, ahead of the head block, so page scripts can use them
+    // without any template needing to know a hostname. (Do not name that block
+    // in a comment: Jinja parses its tags inside JS comments too, and writing
+    // the literal tag here opened a second, unclosed block.)
+    const PORTAL_BASE_URL = "{{ PORTAL_BASE_URL }}";
+    const OHIF_BASE_URL = "{{ OHIF_BASE_URL }}";
+    const DCM4CHEE_ADMIN_BASE_URL = "{{ DCM4CHEE_ADMIN_BASE_URL }}";
+  </script>
+  {% block head %}{% endblock %}
+
+</head>
+
+<body class="{% if embedded %}embedded{% endif %}">
+
+  {% if not embedded %}
+  <nav class="sidebar">
+    <div class="sidebar-brand">InterACT</div>
+    <div class="sidebar-nav">
+    <ul>
+      <!-- Everyone can see OHIF Viewer -->
+      <li class="{% if request.endpoint == 'viewer.ohif' %}active{% endif %}"><a href="{{ url_for('viewer.ohif') }}"><i class="fa-solid fa-eye"></i> OHIF Viewer</a></li>
+
+      {% if is_admin %}
+        <!-- Only admins see this -->
+        <li class="{% if request.endpoint == 'viewer.database' %}active{% endif %}"><a href="{{ url_for('viewer.database') }}"><i class="fa-solid fa-database"></i> Database</a></li>
+        <li class="{% if request.endpoint == 'audit_log.index' %}active{% endif %}"><a href="{{ url_for('audit_log.index') }}"><i class="fa-solid fa-clipboard-list"></i> PHI Access Log</a></li>
+        <li class="{% if request.endpoint and request.endpoint.startswith('job_logs.') %}active{% endif %}"><a href="{{ url_for('job_logs.index') }}"><i class="fa-solid fa-file-lines"></i> Job Logs</a></li>
+      {% endif %}
+
+      <!-- Interactive Segmentation -->
+      <li class="{% if request.endpoint == 'interactive.colleague_iframe' %}active{% endif %}">
+        <a href="{{ url_for('interactive.colleague_iframe') }}" title="SAMinRAD - SAM2-based interactive segmentation"><i class="fa-solid fa-dna"></i> Interactive Segmentation</a>
+      </li>
+
+      <!-- iRODS -->
+      <li class="has-children {% if request.endpoint in ['irods_browser.index', 'irods_browser.browse', 'irods_browser.shared', 'irods_admin.manage_users'] %}expanded active{% endif %}" id="irods-menu">
+        <a href="javascript:void(0);"><i class="fa-solid fa-hard-drive"></i> iRODS</a>
+        <ul class="submenu">
+          <li class="{% if request.endpoint in ['irods_browser.index', 'irods_browser.browse', 'irods_browser.shared'] %}active{% endif %}"><a href="{{ url_for('irods_browser.index') }}">Browse Files</a></li>
+          {% if is_admin %}
+          <li class="{% if request.endpoint == 'irods_admin.manage_users' %}active{% endif %}"><a href="{{ url_for('irods_admin.manage_users') }}">Manage Users</a></li>
+          {% endif %}
+        </ul>
+      </li>
+
+      <!-- Batch Processing -->
+      <li class="{% if request.endpoint == 'batch.index' %}active{% endif %}">
+        <a href="{{ url_for('batch.index') }}"><i class="fa-solid fa-layer-group"></i> Batch Processing</a>
+      </li>
+
+      <!-- Federated Learning -->
+      {% if is_admin %}
+      <li class="has-children {% if (request.endpoint or '').startswith('federated') %}expanded active{% endif %}" id="fl-menu">
+        <a href="javascript:void(0);"><i class="fa-solid fa-network-wired"></i> Federated Learning</a>
+        <ul class="submenu">
+          <li class="{% if request.endpoint == 'federated_rounds.how_to' %}active{% endif %}"><a href="{{ url_for('federated_rounds.how_to') }}">How To</a></li>
+          <li class="{% if request.endpoint == 'federated_instances.index' %}active{% endif %}"><a href="{{ url_for('federated_instances.index') }}">Instances</a></li>
+          <li class="{% if request.endpoint == 'federated_training_data.index' %}active{% endif %}"><a href="{{ url_for('federated_training_data.index') }}">Training Data</a></li>
+          <li class="{% if request.endpoint == 'federated_rounds.index' %}active{% endif %}"><a href="{{ url_for('federated_rounds.index') }}">Training Rounds</a></li>
+        </ul>
+      </li>
+      {% endif %}
+    </ul>
+    </div>
+
+
+    <div class="sidebar-footer">
+      {% if logged_in %}
+        <div class="user-menu" id="user-menu">
+          <button type="button" class="user-menu-trigger" id="user-menu-trigger" aria-haspopup="true" aria-expanded="false">
+            <div class="avatar">{{ (username or '')[:2]|upper }}</div>
+            <div class="user-name">{{ username }}</div>
+          </button>
+          <div class="user-menu-popup" id="user-menu-popup">
+            <div class="user-menu-role">{{ 'Admin' if is_admin else 'User' }}</div>
+            <a href="{{ url_for('home.home') }}">Report Bugs</a>
+            <a href="{{ url_for('auth.change_password') }}">Change Password</a>
+            <a href="{{ url_for('auth.logout') }}">Logout</a>
+          </div>
+        </div>
+      {% else %}
+        <a href="{{ url_for('auth.login') }}">Login</a>
+      {% endif %}
+    </div>
+  </nav>
+  {% endif %}
+
+  <div class="main-content">
+
+    <div class="page-body">
+      <div id="page-slot">
+        {% block flashes %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+        {% endblock %}
+        {% block content %}{% endblock %}
+      </div>
+      <div id="nav-slots"></div>
+    </div>
+
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      document.querySelectorAll(".sidebar .has-children > a").forEach(function (anchor) {
+        anchor.addEventListener("click", function () {
+          anchor.parentElement.classList.toggle("expanded");
+        });
+      });
+
+      var userMenu = document.getElementById("user-menu");
+      var userMenuTrigger = document.getElementById("user-menu-trigger");
+      if (userMenu && userMenuTrigger) {
+        userMenuTrigger.addEventListener("click", function (e) {
+          e.stopPropagation();
+          var isOpen = userMenu.classList.toggle("open");
+          userMenuTrigger.setAttribute("aria-expanded", isOpen);
+        });
+        document.addEventListener("click", function (e) {
+          if (!userMenu.contains(e.target)) {
+            userMenu.classList.remove("open");
+            userMenuTrigger.setAttribute("aria-expanded", "false");
+          }
+        });
+      }
+    });
+  </script>
+
+  <script>
+    // Client-side navigation shell: sidebar links are intercepted so the top
+    // document never unloads. Every destination gets its own iframe slot,
+    // created once and only ever hidden/shown afterwards - a full page
+    // navigation would destroy and recreate it every time, which is why any
+    // page used to reset to its default view whenever you visited it again.
+    (function () {
+      var sidebar = document.querySelector(".sidebar-nav");
+      if (!sidebar) return; // embedded pages have no sidebar to wire up
+
+      var OHIF_PATH = "{{ url_for('viewer.ohif') }}";
+      var OHIF_WORKLIST_SRC = "{{ OHIF_BASE_URL }}/?sortBy=studyDate&sortDirection=ascending";
+      // Set by OHIF's own session-guard script (docker-nginx-dcm4chee.js)
+      // when it breaks out of this iframe to show Keycloak's login page: the
+      // `rd` it sends carries this page's exact prior OHIF path so re-login
+      // can rebuild the same view instead of resetting to the worklist.
+      // Only meaningful on the hard top-level load right after that login -
+      // subsequent soft-nav visits below always use OHIF_WORKLIST_SRC.
+      var ohifReturnPath = new URLSearchParams(location.search).get("ohif_path");
+      var OHIF_IFRAME_SRC = ohifReturnPath
+        ? "{{ OHIF_BASE_URL }}" + ohifReturnPath
+        : OHIF_WORKLIST_SRC;
+
+      var pageSlot = document.getElementById("page-slot");
+      var slotsContainer = document.getElementById("nav-slots");
+      var slots = {}; // cache key -> slot element
+
+      function pathOf(url) {
+        var a = document.createElement("a");
+        a.href = url;
+        return a.pathname;
+      }
+
+      // Cache key includes the query string so distinct views of the same
+      // route (e.g. ?study=...) each get their own persisted slot.
+      function keyOf(url) {
+        var a = document.createElement("a");
+        a.href = url;
+        return a.pathname + a.search;
+      }
+
+      function showSlot(slot) {
+        pageSlot.style.display = (slot === pageSlot) ? "block" : "none";
+        Object.keys(slots).forEach(function (k) {
+          slots[k].style.display = (slots[k] === slot) ? "block" : "none";
+        });
+      }
+
+      function setActiveLink(path) {
+        sidebar.querySelectorAll("li").forEach(function (li) {
+          li.classList.remove("active");
+        });
+        sidebar.querySelectorAll("a[href]").forEach(function (a) {
+          if (pathOf(a.getAttribute("href")) !== path) return;
+          var li = a.closest("li");
+          if (!li) return;
+          li.classList.add("active");
+          var submenu = li.closest(".submenu");
+          var parentLi = submenu && submenu.closest("li.has-children");
+          if (parentLi) parentLi.classList.add("active", "expanded");
+        });
+      }
+
+      function go(url, push) {
+        var path = pathOf(url);
+        var key = keyOf(url);
+
+        var slot = slots[key];
+        if (!slot) {
+          slot = document.createElement("div");
+          slot.className = "nav-slot";
+          var iframe = document.createElement("iframe");
+          iframe.title = "InterACT";
+          if (path === OHIF_PATH) {
+            iframe.src = OHIF_IFRAME_SRC;
+          } else {
+            var sep = url.indexOf("?") === -1 ? "?" : "&";
+            iframe.src = url + sep + "embedded=1";
+          }
+          slot.appendChild(iframe);
+          slotsContainer.appendChild(slot);
+          slots[key] = slot;
+        }
+        showSlot(slot);
+
+        setActiveLink(path);
+        if (push) history.pushState({ softNav: true }, "", url);
+      }
+
+      sidebar.querySelectorAll("a[href]").forEach(function (a) {
+        var href = a.getAttribute("href");
+        if (!href || href.indexOf("javascript:") === 0) return;
+        a.addEventListener("click", function (e) {
+          if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+          e.preventDefault();
+          go(a.href, true);
+        });
+      });
+
+      window.addEventListener("popstate", function () {
+        go(location.href, false);
+      });
+
+      if (pathOf(location.href) === OHIF_PATH) {
+        // ohif.html only renders static fallback markup now (see that
+        // template) - the real viewer always lives in a slot iframe, so
+        // build it the same way a soft-nav click would.
+        go(location.href, false);
+      } else {
+        // Any other hard/direct load: the server already rendered real
+        // content into #page-slot, so remember it under its own key
+        // instead of spinning up a duplicate iframe the first time the
+        // user re-visits this same page.
+        slots[keyOf(location.href)] = pageSlot;
+        setActiveLink(pathOf(location.href));
+      }
+    })();
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

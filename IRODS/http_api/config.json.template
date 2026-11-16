@@ -1,0 +1,70 @@
+{
+    "http_server": {
+        "host": "0.0.0.0",
+        "port": 9000,
+
+        "log_level": "info",
+
+        "authentication": {
+            "eviction_check_interval_in_seconds": 60,
+
+            "openid_connect": {
+                "timeout_in_seconds": 3600,
+                "state_timeout_in_seconds": 600,
+
+                "provider_url": "@OIDC_PROVIDER_URL@",
+
+                "client_id": "@OIDC_CLIENT_ID@",
+                "client_secret": "@OIDC_CLIENT_SECRET@",
+
+                "access_token_validation_method": "introspection",
+
+                "require_aud_member_from_introspection_endpoint": false,
+
+                "user_mapping": {
+                    "plugin_path": "/usr/lib/irods_http_api/plugins/user_mapping/libirods_http_api_plugin-user_claim.so",
+                    "configuration": {
+                        "irods_user_claim": "preferred_username"
+                    }
+                }
+            }
+        },
+
+        "requests": {
+            "threads": 16,
+            "max_size_of_request_body_in_bytes": 2147483648,
+            "timeout_in_seconds": 300
+        },
+
+        "background_io": {
+            "threads": 16
+        }
+    },
+
+    "irods_client": {
+        "host": "irods-catalog-provider",
+        "port": 1247,
+        "zone": "@IRODS_ZONE_NAME@",
+
+        "enable_4_2_compatibility": false,
+
+        "proxy_admin_account": {
+            "username": "rods",
+            "password": "@IRODS_ADMIN_PASSWORD@"
+        },
+
+        "connection_pool": {
+            "size": 32,
+            "refresh_timeout_in_seconds": 600,
+            "max_retrievals_before_refresh": 256,
+            "refresh_when_resource_changes_detected": true
+        },
+
+        "max_number_of_parallel_write_streams": 3,
+
+        "max_number_of_bytes_per_read_operation": 1048576,
+        "max_number_of_bytes_per_write_operation": 1048576,
+
+        "max_number_of_rows_per_catalog_query": 20000
+    }
+}

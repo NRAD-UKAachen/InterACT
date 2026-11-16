@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .drop-zone {
+    border: 2px dashed var(--border-strong); border-radius: 10px; padding: 28px;
+    text-align: center; color: var(--text-muted); cursor: pointer; position: relative;
+  }
+  .drop-zone.dragging, .drop-zone.scanning {
+    border-color: var(--green); background: rgba(102,153,0,0.08); color: #fff;
+  }
+  .drop-zone.scanning { cursor: default; }
+  .drop-zone i { font-size: 1.6rem; margin-bottom: 8px; display: block; }
+  .fl-example-tree {
+    font-family: monospace; background: var(--surface-1); border: 1px solid var(--border-strong);
+    color: var(--text-dim); padding: 12px 16px; border-radius: var(--radius-sm);
+    white-space: pre; font-size: 0.85rem; overflow-x: auto;
+  }
+  .fl-preview-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.88rem; }
+  .fl-preview-ok { color: var(--success); }
+  .fl-preview-bad { color: var(--danger); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+  <h2><i class="fa-solid fa-database"></i> Federated Learning -- Training Data</h2>
+
+  <div class="card">
+    <h3>Expected folder structure</h3>
+    <p class="hint">This data stays on this server -- it's read directly by the local training
+       container each round and is never uploaded to any other instance. Only the resulting
+       model weights (not encrypted) and per-case data statistics leave this host.</p>
+    <div class="fl-example-tree">your-folder/
+  images/
+    case001.nii.gz
+    case002.nii.gz
+  labels/
+    case001.nii.gz
+    case002.nii.gz</div>
+    <p class="hint" style="margin-top:10px;">Every file in <code>images/</code> needs a matching
+       file in <code>labels/</code> with the exact same filename. <code>.nii</code> / <code>.nii.gz</code>
+       only. Drag the whole <code>your-folder</code> in below (or its <code>images/</code>+<code>labels/</code>
+       contents directly) -- either way works, matching is done by filename, not by folder depth.</p>
+    <p class="hint" style="margin-top:10px;">Everything you upload in one go becomes one
+       <strong>batch</strong>, shown as its own group below (who uploaded it, when, how many cases)
+       with a single button to delete the whole batch later. Individual cases can still be deleted
+       one at a time too.</p>
+  </div>
+
+  <div class="card">
+    <h3>Add cases</h3>
+    <label for="batch-label" style="font-size:0.85rem;color:var(--text-dim);">Batch name (required)</label>
+    <input type="text" id="batch-label" class="form-control" placeholder="e.g. BraTS glioma set 1" required
+           style="margin-bottom:12px;">
+    <div class="drop-zone" id="input-drop-zone">
+      <div id="input-drop-zone-content">
+        <i class="fa-solid fa-folder-open"></i>
+        Drag and drop your folder here, or click to choose one.
+      </div>
+    </div>
+    <input type="file" id="input-file-picker" webkitdirectory directory multiple hidden>
+
+    <div id="preview-box" style="margin-top:16px; display:none;">
+      <p id="preview-summary" style="font-size:0.9rem; color: var(--text-dim);"></p>
+      <div id="preview-list"></div>
+      <button class="btn btn-primary" id="submit-btn" style="margin-top:12px;" disabled>Upload</button>
+    </div>
+    <div id="upload-result" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card">
+    <h3>Current cases ({{ case_count }})</h3>
+    {% for batch in batches %}
+    <div class="fl-batch" style="margin-bottom:12px; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="toggleBatchCases({{ loop.index }})">
+        <div>
+          <i class="fa-solid fa-chevron-right fl-batch-chevron" id="chevron-{{ loop.index }}" style="width:12px; display:inline-block; transition: transform .15s ease;"></i>
+          {% if batch.batch_id %}
+            <strong>{{ batch.label }}</strong>
+            <span class="hint" style="margin-left:8px;">by {{ batch.uploaded_by }}, {{ batch.uploaded_at }} -- {{ batch.cases | length }} case(s)</span>
+          {% else %}
+            <strong>Unassigned</strong>
+            <span class="hint" style="margin-left:8px;">uploaded before batch tracking existed -- {{ batch.cases | length }} case(s)</span>
+          {% endif %}
+          {% if batch.batch_id and not batch.enabled %}
+            <span class="badge badge-warn" style="margin-left:8px;" title="Left out of the next training round -- files are kept, not deleted.">Disabled</span>
+          {% endif %}
+        </div>
+        {% if batch.batch_id %}
+          <span onclick="event.stopPropagation()">
+            {% if batch.enabled %}
+              <button class="btn" onclick="setBatchEnabled('{{ batch.batch_id }}', false)">Disable (skip in training)</button>
+            {% else %}
+              <button class="btn btn-primary" onclick="setBatchEnabled('{{ batch.batch_id }}', true)">Enable</button>
+            {% endif %}
+            <button class="btn btn-danger" onclick="deleteBatch('{{ batch.batch_id }}')">Delete whole batch</button>
+          </span>
+        {% endif %}
+      </div>
+      <div id="cases-{{ loop.index }}" style="display:none; margin-top:10px;">
+      <table class="data-table">
+        <thead><tr><th>Case</th><th>Image</th><th>Label</th><th></th></tr></thead>
+        <tbody>
+          {% for c in batch.cases %}
+          <tr>
+            <td><code>{{ c.case_id }}</code></td>
+            <td>{% if c.has_image %}<span class="badge badge-success">present</span>{% else %}<span class="badge badge-danger">missing</span>{% endif %}</td>
+            <td>{% if c.has_label %}<span class="badge badge-success">present</span>{% else %}<span class="badge badge-danger">missing</span>{% endif %}</td>
+            <td><button class="btn btn-danger" onclick="deleteCase('{{ c.case_id }}')">Delete</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+    {% else %}
+    <p style="color: var(--text-muted);">No training data uploaded yet.</p>
+    {% endfor %}
+  </div>
+</div>
+
+<script>
+// ---------- folder-drop upload (adapted from batch.html) ----------
+var stagedFiles = []; // [{file, relPath}, ...]
+var dropZone = document.getElementById('input-drop-zone');
+var dropZoneContent = document.getElementById('input-drop-zone-content');
+var dropZoneIdleHtml = dropZoneContent.innerHTML;
+var filePicker = document.getElementById('input-file-picker');
+var batchLabelInput = document.getElementById('batch-label');
+batchLabelInput.addEventListener('input', renderPreview);
+
+function classify(relPath) {
+  var parts = relPath.split('/');
+  for (var i = 0; i < parts.length; i++) {
+    if ((parts[i] === 'images' || parts[i] === 'labels') && i + 1 < parts.length) {
+      return { bucket: parts[i], filename: parts[parts.length - 1] };
+    }
+  }
+  return null;
+}
+
+function renderPreview() {
+  var previewBox = document.getElementById('preview-box');
+  var previewList = document.getElementById('preview-list');
+  var previewSummary = document.getElementById('preview-summary');
+  var submitBtn = document.getElementById('submit-btn');
+
+  if (!stagedFiles.length) { previewBox.style.display = 'none'; return; }
+  previewBox.style.display = 'block';
+
+  var images = {}, labels = {}, unrecognized = [];
+  stagedFiles.forEach(function (entry) {
+    var c = classify(entry.relPath);
+    if (!c) { unrecognized.push(entry.relPath); return; }
+    if (!c.filename.match(/\.nii(\.gz)?$/)) { unrecognized.push(entry.relPath + ' (not .nii/.nii.gz)'); return; }
+    (c.bucket === 'images' ? images : labels)[c.filename] = true;
+  });
+
+  var allNames = Object.keys(Object.assign({}, images, labels)).sort();
+  var matched = allNames.filter(function (n) { return images[n] && labels[n]; });
+  var unmatched = allNames.filter(function (n) { return !(images[n] && labels[n]); });
+
+  previewSummary.textContent = matched.length + ' matched pair(s), ' +
+    unmatched.length + ' unmatched, ' + unrecognized.length + ' unrecognized file(s).';
+
+  var html = '';
+  unmatched.forEach(function (n) {
+    html += '<div class="fl-preview-row fl-preview-bad"><span>' + n + '</span><span>' +
+      (images[n] ? 'image only -- missing label' : 'label only -- missing image') + '</span></div>';
+  });
+  unrecognized.forEach(function (n) {
+    html += '<div class="fl-preview-row fl-preview-bad"><span>' + n + '</span><span>skipped</span></div>';
+  });
+  matched.slice(0, 5).forEach(function (n) {
+    html += '<div class="fl-preview-row fl-preview-ok"><span>' + n + '</span><span>ok</span></div>';
+  });
+  if (matched.length > 5) {
+    html += '<div class="fl-preview-row" style="color:var(--text-muted);">...and ' + (matched.length - 5) + ' more matched pair(s)</div>';
+  }
+  previewList.innerHTML = html;
+  submitBtn.disabled = matched.length === 0 || !batchLabelInput.value.trim();
+}
+
+function setStaged(files) {
+  stagedFiles = files;
+  renderPreview();
+}
+
+function setScanning(isScanning) {
+  dropZone.classList.toggle('scanning', isScanning);
+  dropZoneContent.innerHTML = isScanning
+    ? '<i class="fa-solid fa-spinner fa-spin"></i> Reading dropped folder…'
+    : dropZoneIdleHtml;
+}
+
+dropZone.addEventListener('click', function () { filePicker.click(); });
+filePicker.addEventListener('change', function () {
+  var files = Array.prototype.map.call(filePicker.files, function (f) {
+    return { file: f, relPath: f.webkitRelativePath || f.name };
+  });
+  if (files.length) setStaged(files);
+});
+
+var dragCounter = 0;
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(function (evt) {
+  dropZone.addEventListener(evt, function (e) { e.preventDefault(); e.stopPropagation(); });
+});
+dropZone.addEventListener('dragenter', function () {
+  dragCounter++;
+  dropZone.classList.add('dragging');
+});
+dropZone.addEventListener('dragleave', function () {
+  dragCounter = Math.max(0, dragCounter - 1);
+  if (dragCounter === 0) dropZone.classList.remove('dragging');
+});
+
+function walkEntry(entry) {
+  return new Promise(function (resolve) {
+    if (entry.isFile) {
+      entry.file(function (file) {
+        resolve([{ file: file, relPath: entry.fullPath.replace(/^\/+/, '') }]);
+      }, function () { resolve([]); });
+    } else if (entry.isDirectory) {
+      var reader = entry.createReader();
+      var children = [];
+      (function readBatch() {
+        reader.readEntries(function (batch) {
+          if (!batch.length) {
+            Promise.all(children.map(walkEntry)).then(function (lists) {
+              resolve([].concat.apply([], lists));
+            });
+            return;
+          }
+          children = children.concat(batch);
+          readBatch();
+        }, function () { resolve([]); });
+      })();
+    } else {
+      resolve([]);
+    }
+  });
+}
+
+dropZone.addEventListener('drop', function (e) {
+  dragCounter = 0;
+  dropZone.classList.remove('dragging');
+  var items = e.dataTransfer && e.dataTransfer.items;
+  var entries = items && Array.prototype.map.call(items, function (item) {
+    return item.webkitGetAsEntry && item.webkitGetAsEntry();
+  }).filter(Boolean);
+
+  if (entries && entries.length) {
+    setScanning(true);
+    Promise.all(entries.map(walkEntry)).then(function (lists) {
+      setScanning(false);
+      var flat = [].concat.apply([], lists);
+      if (flat.length) setStaged(flat);
+    });
+    return;
+  }
+  var files = e.dataTransfer && e.dataTransfer.files;
+  if (files && files.length) {
+    setStaged(Array.prototype.map.call(files, function (f) { return { file: f, relPath: f.name }; }));
+  }
+});
+
+document.getElementById('submit-btn').addEventListener('click', async function () {
+  var batchLabel = batchLabelInput.value.trim();
+  if (!batchLabel) { alert('Batch name is required.'); return; }
+
+  var fd = new FormData();
+  fd.append('batch_label', batchLabel);
+  stagedFiles.forEach(function (entry) {
+    fd.append('file', entry.file);
+    fd.append('relpath', entry.relPath);
+  });
+  this.disabled = true;
+  this.textContent = 'Uploading...';
+  try {
+    const resp = await fetch("{{ url_for('federated_training_data.upload') }}", { method: 'POST', body: fd });
+    let result;
+    try {
+      result = await resp.json();
+    } catch (e) {
+      result = { error: 'Unexpected response from server (HTTP ' + resp.status + ')' };
+    }
+    if (!resp.ok) {
+      document.getElementById('upload-result').innerHTML =
+        '<p class="fl-preview-bad">Failed: ' + (result.error || resp.statusText) + '</p>';
+      this.disabled = false;
+      this.textContent = 'Upload';
+      return;
+    }
+    location.reload();
+  } catch (e) {
+    document.getElementById('upload-result').innerHTML =
+      '<p class="fl-preview-bad">Failed: ' + e.message + '</p>';
+    this.disabled = false;
+    this.textContent = 'Upload';
+  }
+});
+
+async function deleteCase(caseId) {
+  if (!confirm('Delete "' + caseId + '" from both images/ and labels/?')) return;
+  const resp = await fetch("{{ url_for('federated_training_data.index') }}" + encodeURIComponent(caseId), {
+    method: 'DELETE',
+  });
+  if (resp.ok) { location.reload(); } else { alert('Failed: ' + (await resp.text())); }
+}
+
+function toggleBatchCases(idx) {
+  const cases = document.getElementById('cases-' + idx);
+  const chevron = document.getElementById('chevron-' + idx);
+  const open = cases.style.display !== 'none';
+  cases.style.display = open ? 'none' : 'block';
+  chevron.style.transform = open ? 'rotate(0deg)' : 'rotate(90deg)';
+}
+
+async function setBatchEnabled(batchId, enabled) {
+  const resp = await fetch("{{ url_for('federated_training_data.index') }}batch/" + encodeURIComponent(batchId) + "/enabled", {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enabled: enabled}),
+  });
+  if (resp.ok) { location.reload(); } else { alert('Failed: ' + (await resp.text())); }
+}
+
+async function deleteBatch(batchId) {
+  if (!confirm('Delete this whole batch -- every case in it, from both images/ and labels/?')) return;
+  const resp = await fetch("{{ url_for('federated_training_data.index') }}batch/" + encodeURIComponent(batchId), {
+    method: 'DELETE',
+  });
+  if (resp.ok) { location.reload(); } else { alert('Failed: ' + (await resp.text())); }
+}
+</script>
+{% endblock %}

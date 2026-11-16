@@ -1,0 +1,148 @@
+# InterACT processing API: batch jobs and processes triggered from custom buttons in OHIF.
+#
+# Always start this container from the InterACT root folder, not from this directory.
+# All values come from the root .env file (see .env.example).
+
+services:
+  ohif_api:
+    image: ${STACK_NAME:-interact}-ohif_api:latest
+    container_name: ${STACK_NAME:-interact}-ohif_api
+    build: .
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 'all'
+              capabilities: [gpu]
+    environment:
+      # brats launches the algorithm as a SIBLING container on the host docker
+      # daemon (docker.sock below), so its tempfile.mkdtemp() input/output dirs
+      # must live on a path that is identical on host and in this container.
+      # /tmp is not shared, so point TMPDIR into the already-shared API_storage
+      # mount; otherwise the algorithm mounts an empty input dir and silently
+      # produces 0 output files.
+      # Where this API stores everything it produces. app/storage_paths.py
+      # resolves it from here; the bind mount below puts it at the identical
+      # path, for the same host/container sameness the note above describes.
+      - API_STORAGE_DIR=${API_STORAGE_DIR}
+      - TMPDIR=${API_STORAGE_DIR}/tmp
+      # Public image carrying the screw-segmentation model, launched as a
+      # sibling container by app/screw_inference_functions.py. Unset until
+      # that image is published, which makes the route fail with an
+      # explanation instead of running against nothing.
+      - SCREW_MODEL_IMAGE=${SCREW_MODEL_IMAGE:-}
+      # Where app/ldct_functions.py reaches the LDCT service (profile: ldct),
+      # by Compose service name over the shared dcm4chee network.
+      - LDCT_SERVICE_URL=${LDCT_SERVICE_URL:-http://ldct_api:8000}
+      # Job logs: ${API_STORAGE_DIR}/logs/ (see app/job_logging.py). Unbuffered
+      # so docker logs shows lines as they happen, not a block at a time.
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=${API_LOG_LEVEL:-DEBUG}
+      - LOG_RETENTION_DAYS=${LOG_RETENTION_DAYS:-30}
+      # Retention for the rest of API_storage, not just the logs: app/
+      # storage_cleanup.py sweeps the regenerable per-study output roots
+      # (fastsurfer/, dti/, synthseg/, ...) on a daily thread. It works off an
+      # allowlist and, in the study-keyed roots, only touches children named
+      # like a DICOM UID -- so downloaded weights, shared template subjects, the
+      # older API's leftovers and live batch jobs are all out of reach. That
+      # module's docstring is the full list. 0 turns the sweep off.
+      - STORAGE_RETENTION_DAYS=${STORAGE_RETENTION_DAYS:-30}
+      # TotalSegmentator downloads its nnU-Net weights (several GB) into this
+      # dir on first use per task. Point it at the already-mounted, persistent
+      # API_storage volume so weights survive container rebuilds/restarts
+      # instead of being wiped and re-downloaded every time.
+      - TOTALSEG_HOME_DIR=${API_STORAGE_DIR}/totalsegmentator_weights
+      # Several tools reach off-site on first use (brainles_preprocessing pulls
+      # atlases from Zenodo, TotalSegmentator pulls weights). If this machine
+      # only reaches the internet through a proxy, set HTTP_PROXY in the root
+      # .env file.
+      - HTTP_PROXY=${INTERACT_HTTP_PROXY:-}
+      - HTTPS_PROXY=${INTERACT_HTTPS_PROXY:-}
+      - http_proxy=${INTERACT_HTTP_PROXY:-}
+      - https_proxy=${INTERACT_HTTPS_PROXY:-}
+      - ALL_PROXY=
+      # Everything internal must bypass that proxy. Container-to-container
+      # calls are by name, so each peer needs listing explicitly -- the CIDRs
+      # only match URLs written as bare IPs. The list is shared across all
+      # stacks; see NO_PROXY in the root .env.
+      - NO_PROXY=${INTERACT_NO_PROXY:-}
+      - no_proxy=${INTERACT_NO_PROXY:-}
+      # FSL configuration for hippocampus_functions.py (run_first_all), same
+      # values docker-context-gui uses for its own FSL calls.
+      - FSLDIR=/usr/local/fsl
+      - FSLOUTPUTTYPE=NIFTI_GZ
+      # FreeSurfer, for synthseg_functions.py's mri_synthseg (mounted below).
+      # Its launcher script exits immediately if this isn't set.
+      - FREESURFER_HOME=/usr/local/freesurfer
+      # FastSurfer runs as a sibling container and needs a FreeSurfer licence
+      # of its own, bind-mounted at /fs_license (see the volume below and
+      # secrets/freesurfer/README.md). FS_LICENSE is set as well as passed via
+      # --fs_license because the recon-surf scripts only honour one of them --
+      # see fastsurfer_long_functions.py's docstring.
+      - FS_LICENSE=/fs_license/license.txt
+      - FS_LICENSE_DIR=${FS_LICENSE_DIR}
+      # batch_jobs.py's worker pool size for cohort-sized batches. 
+      # Pin NUM_GPUS below the real count so
+      # slot_index % NUM_GPUS never lands on the last card, keeping it free for
+      # the interactive per-study route.
+      - BATCH_JOB_CONCURRENCY=${BATCH_JOB_CONCURRENCY:-3}
+      - BATCH_JOB_NUM_GPUS=${BATCH_JOB_NUM_GPUS:-1}
+      # Authenticated front door for the "3D Slicer files" links hippocampus_
+      # functions.py embeds in its report. This API is loopback-only (see the
+      # ports comment below); docker-context-gui's api_proxy_bp forwards
+      # /api-proxy/hippocampus_files/... to it after checking the Keycloak
+      # session, so point browser-facing links there instead of at :9200.
+      - API_PUBLIC_BASE_URL=${PORTAL_BASE_URL}/api-proxy
+    volumes:
+      - .:/app
+      - ${API_STORAGE_DIR}:${API_STORAGE_DIR}
+      # FSL installation, for hippocampus_functions.py's run_first_all.
+      - ${FSL_DIR}:/usr/local/fsl:ro
+      # FreeSurfer, for synthseg_functions.py's mri_synthseg -- same
+      # arrangement as FSL above. The SynthSeg weights ship inside this tree
+      # ($FREESURFER_HOME/models/synthseg_*.h5), so nothing is fetched at run
+      # time, which matters on a host with no direct outbound internet.
+      - ${FREESURFER_DIR}:/usr/local/freesurfer:ro
+      # Your FreeSurfer licence, for the FastSurfer sibling container.
+      # See secrets/freesurfer/README.md for how to obtain one.
+      - ${FS_LICENSE_DIR}:/fs_license:ro
+      # TotalSegmentator licence key for its gated tasks (brain_structures).
+      # See secrets/totalsegmentator/README.md.
+      - ${TOTALSEG_LICENSE_DIR:-${INTERACT_ROOT}/secrets/totalsegmentator}:/totalseg_license:ro
+      # (SynthSeg's CUDA 11.8 runtime lives in API_storage/synthseg_cuda11 and
+      # is already covered by the API_storage mount above -- see
+      # SYNTHSEG_CUDA11_ROOT in synthseg_functions.py.)
+      # brainles_preprocessing hardcodes its Zenodo download targets *inside*
+      # its own site-packages tree (utils/zenodo.py's ATLASES_FOLDER /
+      # SYNTHSTRIP_FOLDER), i.e. the ephemeral container fs -- so every image
+      # rebuild silently wipes multi-GB assets and re-downloads them. Bind
+      # them onto API_storage so they persist, same reasoning as
+      # TOTALSEG_HOME_DIR above.
+      - ${API_STORAGE_DIR}/brainles_atlases:/usr/local/lib/python3.10/site-packages/brainles_preprocessing/registration/atlases
+      - ${API_STORAGE_DIR}/brainles_synthstrip_weights:/usr/local/lib/python3.10/site-packages/brainles_preprocessing/brain_extraction/weights
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker
+    ports:
+      # Loopback only. This API has NO authentication of its own (see
+      # routes.py) and its endpoints fetch, process and STOW identifiable
+      # patient studies, so publishing it on 0.0.0.0 would make every study on
+      # dcm4chee readable by anything that could reach this host. Consumers
+      # inside Docker reach it as http://ohif_api:9200 over the shared
+      # interact-dcm4chee network and are unaffected.
+      - "127.0.0.1:${PORT_API:-9200}:9200"
+    # nnU-Net's (TotalSegmentator) preprocessing workers pass CT volumes between
+    # processes via /dev/shm; Docker's 64MB default is too small for those and
+    # the workers get silently killed ("Background workers died"), so raise it.
+    shm_size: '8gb'
+    restart: unless-stopped
+    command: python run.py
+    networks:
+      - interact-dcm4chee
+
+# Declared identically in every stack file and in the root docker-compose.yml.
+# `include:` merges these top-level blocks, so they must agree exactly.
+networks:
+  interact-dcm4chee:
+    name: ${STACK_NAME:-interact}-dcm4chee
+    driver: bridge

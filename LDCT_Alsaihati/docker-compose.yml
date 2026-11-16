@@ -1,0 +1,57 @@
+# Low-dose CT simulation service (Compose profile: ldct).
+#
+# Part of the InterACT Compose project -- start it from the repo root
+# (`docker compose --profile ldct up -d`), not from this directory. All values
+# come from the root .env; see .env.example.
+
+services:
+  ldct_api:
+    image: ${STACK_NAME:-interact}-ldct_api:latest
+    container_name: ${STACK_NAME:-interact}-ldct_api
+    profiles: ["ldct", "all"]
+    build: .
+    networks:
+      - interact-dcm4chee
+    environment:
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=8000
+      - FLASK_DEBUG=False
+      - USE_GPU=${LDCT_USE_GPU:-True}
+      - DEFAULT_GPU_INDEX=${LDCT_GPU_INDEX:-0}
+      - HTTP_PROXY=${INTERACT_HTTP_PROXY:-}
+      - HTTPS_PROXY=${INTERACT_HTTPS_PROXY:-}
+      - http_proxy=${INTERACT_HTTP_PROXY:-}
+      - https_proxy=${INTERACT_HTTPS_PROXY:-}
+      - NO_PROXY=${INTERACT_NO_PROXY:-}
+      - no_proxy=${INTERACT_NO_PROXY:-}
+      - API_STORAGE_DIR=${API_STORAGE_DIR}
+      # `arc` is the dcm4chee service name on the shared network. This used
+      # to be hardcoded as the project-prefixed container name.
+      - DCM4CHEE_RS=http://arc:8080/dcm4chee-arc/aets/DCM4CHEE/rs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - .:/app
+      # Same host path inside the container: the API hands this service paths
+      # it has resolved itself, so both sides must agree on what they mean.
+      - ${API_STORAGE_DIR}:${API_STORAGE_DIR}
+    ports:
+      # Loopback only: the service has no authentication, and the API and
+      # portal reach it as http://ldct_api:8000 over the shared network
+      # anyway. This port is for monitor_ldct.sh and curl on the host.
+      - "127.0.0.1:${PORT_LDCT:-8001}:8000"
+    restart: unless-stopped
+    command: python3 main_app.py
+
+# Declared identically in every stack file and in the root docker-compose.yml.
+# `include:` merges these top-level blocks, so they must agree exactly; the
+# shared names replace the old project-prefixed `nginx-dcm4chee_default`.
+networks:
+  interact-dcm4chee:
+    name: ${STACK_NAME:-interact}-dcm4chee
+    driver: bridge

@@ -1,0 +1,43 @@
+# Fully pinned, the way a pip freeze is -- a rebuild months from now must
+# install byte-identical versions. Splitting the list into "what app/ imports"
+# and "what those pull in" is documentation; both halves are pinned.
+#
+# This app renders pages, holds the Keycloak session and proxies. It does no
+# imaging work of its own, so it needs none of the scientific stack it used to
+# carry (scipy, matplotlib, nibabel, SimpleITK, pynrrd, pydicom, pynetdicom,
+# pillow) nor SQLAlchemy/psycopg2. Format conversion and DICOM upload live in
+# API/ and in OHIF.
+#
+# To add a dependency: add it under "direct", rebuild, then run
+#   docker compose run --rm --entrypoint pip interact-gui freeze
+# and reconcile the transitive block below against that output.
+
+# --- direct: imported somewhere under app/ ----------------------------------
+Flask==3.1.1
+flask-oidc==2.4.0
+flask-cors==6.0.1
+Flask-Session==0.8.0
+cachelib==0.15.4
+MarkupSafe==3.0.2
+Werkzeug==3.1.3
+requests==2.32.4
+
+# --- transitive: pinned so the build stays reproducible ---------------------
+
+# flask-oidc -> Authlib -> cryptography -> cffi -> pycparser
+Authlib==1.6.1
+cryptography==45.0.5
+cffi==1.17.1
+pycparser==2.22
+# requests
+certifi==2025.7.14
+charset-normalizer==3.4.2
+idna==3.10
+urllib3==2.5.0
+# Flask
+blinker==1.9.0
+click==8.2.1
+itsdangerous==2.2.0
+Jinja2==3.1.6
+# flask-oidc
+msgspec==0.21.1

@@ -1,0 +1,237 @@
+# Apache Airflow, orchestrating the federated-learning rounds
+# (Compose profile: airflow).
+#
+# Part of the InterACT Compose project -- start it from the repo root
+# (`docker compose --profile airflow up -d`), not from this directory. All
+# values come from the root .env; see .env.example.
+
+x-airflow-common: &airflow-common
+  # image: apache/airflow:2.9.3-python3.11
+  image: local-only/${STACK_NAME:-interact}-airflow-interact:2.9.3-python3.11
+  build: ./docker/airflow-custom
+
+  environment: &airflow-env
+    # Install Docker provider for DockerOperator
+    # _PIP_ADDITIONAL_REQUIREMENTS: 'apache-airflow-providers-docker'
+    # Proxy settings for pip and network access
+    # Proxy for pip and outbound network access. Empty unless this machine
+    # needs a proxy to reach the internet; see the root .env.
+    HTTP_PROXY: '${INTERACT_HTTP_PROXY:-}'
+    HTTPS_PROXY: '${INTERACT_HTTPS_PROXY:-}'
+    NO_PROXY: '${INTERACT_NO_PROXY:-}'
+    # Both cases, and the lowercase ones are the load-bearing half: Python's
+    # urllib reads lowercase `no_proxy`, and a daemon-level proxy in
+    # ~/.docker/config.json injects its own lowercase pair into every
+    # container. Setting only the uppercase names left the injected
+    # `no_proxy=localhost,127.0.0.0/8` in force, so a DAG reaching dcm4chee at
+    # http://arc:8080 went out through the corporate proxy and got its error
+    # page back as an HTTP 500.
+    http_proxy: '${INTERACT_HTTP_PROXY:-}'
+    https_proxy: '${INTERACT_HTTPS_PROXY:-}'
+    no_proxy: '${INTERACT_NO_PROXY:-}'
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD:?Set AIRFLOW_DB_PASSWORD in the root .env}@airflow-postgres:5432/airflow
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+    AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+    AIRFLOW__WEBSERVER__BASE_URL: '${PUBLIC_SCHEME}://${PUBLIC_HOST}:${PORT_AIRFLOW}'
+    # Shared env for DAGs to access DCM4CHEE
+    DCM4CHEE_RS: 'http://arc:8080/dcm4chee-arc/aets/DCM4CHEE/rs'
+    DCM4CHEE_DICOM_HOST: 'arc'
+    DCM4CHEE_DICOM_PORT: '11112'
+    # Shared data paths (host paths for DockerOperator mounts)
+    AIRFLOW_WORKFLOWS_HOST_DIR: '${AIRFLOW_WORKFLOWS_DIR}'
+    FL_LOCAL_TRAINING_DATA_HOST_DIR: '${FL_LOCAL_TRAINING_DATA_DIR}'
+    # This instance's own externally-reachable address, for URLs the
+    # coordinator DAGs hand out to REMOTE sites (global_model_url,
+    # public_context_url, callback_url in dag_fl_*_coordinator.py's
+    # _distribute_round). Same PUBLIC_HOST/PUBLIC_SCHEME already used for
+    # AIRFLOW__WEBSERVER__BASE_URL above -- reachable from another site, unlike
+    # the code's own fallback default (http://docker-context-gui:5000/...),
+    # which only resolves inside this machine's own Docker network and broke
+    # every remote-facing round URL until this was set.
+    FL_COORDINATOR_UPLOAD_BASE_URL: '${PUBLIC_SCHEME}://${PUBLIC_HOST}:${PORT_PORTAL:-5005}/federated/rounds'
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - ./data/workflows:/data/airflow/workflows
+    - /var/run/docker.sock:/var/run/docker.sock
+  user: "${HOST_UID:-1000}:0"
+  group_add:
+    # The host's docker group, so DockerOperator can reach /var/run/docker.sock.
+    #   DOCKER_GID=$(getent group docker | cut -d: -f3)
+    - "${DOCKER_GID:-998}"
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    airflow-postgres:
+      condition: service_healthy
+
+services:
+  airflow-postgres:
+    image: postgres:15
+    container_name: ${STACK_NAME:-interact}-airflow-postgres
+    profiles: ["airflow", "all"]
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD:?Set AIRFLOW_DB_PASSWORD in the root .env}
+      POSTGRES_DB: airflow
+    ports:
+      - "${PORT_AIRFLOW_DB:-5433}:5432"
+    volumes:
+      - airflow-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - default
+
+  # Build-only: the trainer image the FL DAGs launch as a sibling container,
+  # never a long-running service. It is here so `up --build` builds it with
+  # everything else -- it used to need setup_federated_learning.sh, and a
+  # stack started without that came up looking healthy and then failed on the
+  # first round with "No such image". Starting it just runs `true` and exits;
+  # airflow-init waits on that, so the scheduler cannot start without it.
+  # `image:` must match the image= in both dag_fl_segresnet_*.py files.
+  fl-segresnet-trainer:
+    image: local-only/fl-segresnet-trainer:0.1.0
+    build: ./docker/fl-segresnet-trainer
+    container_name: ${STACK_NAME:-interact}-fl-segresnet-trainer-build
+    profiles: ["airflow", "all"]
+    entrypoint: ["true"]
+    restart: "no"
+    networks:
+      - default
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: ${STACK_NAME:-interact}-airflow-init
+    profiles: ["airflow", "all"]
+    environment:
+      <<: *airflow-env
+      AIRFLOW_API_USER: '${AIRFLOW_API_USER:-admin}'
+      AIRFLOW_API_PASSWORD: '${AIRFLOW_API_PASSWORD:?Set AIRFLOW_API_PASSWORD in the root .env}'
+    # NOT `entrypoint: /bin/bash`. The image's own entrypoint (/entrypoint) is
+    # what registers an arbitrary uid in /etc/passwd -- these containers run as
+    # HOST_UID, which has no passwd entry, and Airflow's getuser() raises
+    # "running as has no username" without one. Overriding the entrypoint
+    # skipped that, so this init step could never have worked; it only looked
+    # like it did because the old script swallowed the error and exited 0.
+    # Passing bash as the COMMAND lets /entrypoint do its setup and then exec us.
+    command:
+      - bash
+      - -c
+      - |
+        # `set -e`, and note what it is guarding against. Without it a failing
+        # `airflow db migrate` did not stop the script: the `|| true` on the
+        # next command and the trailing echo left the container exiting 0, so
+        # depends_on's service_completed_successfully was satisfied and the
+        # webserver and scheduler came up against a database that had never
+        # been migrated. A broken init has to FAIL, loudly.
+        set -e
+
+        # The bind-mounted logs/ and plugins/ must be writable by the uid these
+        # containers run as. Docker creates a MISSING bind-mount source as
+        # root, so a fresh clone hits "PermissionError: /opt/airflow/logs" here
+        # before airflow can even configure its logging and import.
+        if ! ( : > /opt/airflow/logs/.write-test ) 2>/dev/null; then
+          echo "ERROR: /opt/airflow/logs is not writable by uid $$(id -u)." >&2
+          echo "  Run:  sudo chown -R \$$HOST_UID:\$$HOST_GID airflow/logs airflow/plugins" >&2
+          exit 1
+        fi
+        rm -f /opt/airflow/logs/.write-test
+
+        # Same failure mode for the FL working area: every round writes its
+        # recipe, models and uploads here, and the trainer containers write
+        # into it too. Better to stop now than on the first round.
+        if ! ( : > /data/airflow/workflows/.write-test ) 2>/dev/null; then
+          echo "ERROR: AIRFLOW_WORKFLOWS_DIR is not writable by uid $$(id -u)." >&2
+          echo "  Run:  sudo chown -R \$$HOST_UID:\$$HOST_GID airflow/data" >&2
+          exit 1
+        fi
+        rm -f /data/airflow/workflows/.write-test
+
+        airflow db migrate
+
+        # Only this one may fail: re-running init on an existing install hits
+        # "user already exist". Anything else is a real error, so check the
+        # account is actually there afterwards.
+        airflow users create \
+          --username "$${AIRFLOW_API_USER:-admin}" \
+          --password "$${AIRFLOW_API_PASSWORD:?Set AIRFLOW_API_PASSWORD in the root .env}" \
+          --firstname Admin \
+          --lastname User \
+          --role Admin \
+          --email admin@interact.local || true
+        airflow users list | grep -q "$${AIRFLOW_API_USER:-admin}"
+
+        echo "Airflow initialization complete."
+    restart: "no"
+    # Restates airflow-common's depends_on -- a key set here replaces the
+    # merged one rather than adding to it.
+    depends_on:
+      airflow-postgres:
+        condition: service_healthy
+      fl-segresnet-trainer:
+        condition: service_completed_successfully
+    networks:
+      - default
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: ${STACK_NAME:-interact}-airflow-webserver
+    profiles: ["airflow", "all"]
+    command: webserver
+    ports:
+      - "${PORT_AIRFLOW:-8085}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - interact-dcm4chee
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: ${STACK_NAME:-interact}-airflow-scheduler
+    profiles: ["airflow", "all"]
+    command: scheduler
+    restart: unless-stopped
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    networks:
+      - default
+      - interact-dcm4chee
+
+# Explicit name, like the networks -- see the comment in
+# keycloak-dev/docker-compose.yml.
+volumes:
+  airflow-postgres-data:
+    name: ${STACK_NAME:-interact}-airflow-pgdata
+
+# Declared identically in every stack file and in the root docker-compose.yml.
+# `include:` merges these top-level blocks, so they must agree exactly; the
+# shared names replace the old project-prefixed `nginx-dcm4chee_default`.
+#
+# `default` has no explicit `name:`, so Compose prefixes it with the project
+# name (STACK_NAME) automatically -- it does not need one here.
+networks:
+  default:
+    driver: bridge
+  interact-dcm4chee:
+    name: ${STACK_NAME:-interact}-dcm4chee
+    driver: bridge

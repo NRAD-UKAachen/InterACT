@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .page-header { justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+  .page-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  .meta-grid {
+    display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px;
+    font-size: 0.85rem; color: var(--text-dim);
+  }
+  .meta-grid dt { color: var(--text-muted); }
+  .meta-grid dd { margin: 0; word-break: break-all; font-family: monospace; font-size: 0.82rem; }
+  .meta-error { color: #e8695c; white-space: pre-wrap; font-family: monospace; font-size: 0.8rem; }
+
+  .log-layout { display: flex; gap: 16px; align-items: flex-start; }
+  .log-main { flex: 1; min-width: 0; }
+  .case-list { width: 280px; flex-shrink: 0; max-height: 75vh; overflow-y: auto; }
+  .case-list a {
+    display: flex; justify-content: space-between; gap: 8px; padding: 6px 10px;
+    font-family: monospace; font-size: 0.78rem; color: var(--text-dim);
+    border-radius: var(--radius); text-decoration: none; word-break: break-all;
+  }
+  .case-list a:hover { background: var(--surface-hover); }
+  .case-list a.current { background: var(--surface-hover); color: var(--text); font-weight: 600; }
+  @media (max-width: 900px) {
+    .log-layout { flex-direction: column; }
+    .case-list { width: 100%; max-height: 240px; }
+  }
+
+  .log-toolbar {
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
+    gap: 10px; margin-bottom: 8px; font-size: 0.85rem; color: var(--text-muted);
+  }
+  .log-toolbar label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #4cd787;
+              margin-right: 6px; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+
+  .log-output {
+    background: #0f1115; color: #d4d4d4; border-radius: var(--radius);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.78rem;
+    line-height: 1.45; padding: 12px 14px; margin: 0;
+    height: 70vh; overflow: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .log-output .l-warn   { color: #f0c05a; }
+  .log-output .l-error  { color: #ff7b6b; }
+  .log-output .l-stderr { color: #b9a4d9; }
+  .log-output .l-stage  { color: #6cb6ec; font-weight: 600; }
+  .log-output .l-cmd    { color: #5fd3bc; }
+
+  .st-running, .st-pending, .st-pausing, .st-stopping { background: rgba(52,152,219,0.18); color: #6cb6ec; }
+  .st-done     { background: rgba(46,204,113,0.18); color: #4cd787; }
+  .st-failed   { background: var(--danger-bg); color: #e8695c; }
+  .st-paused, .st-stopped, .st-partial, .st-skipped { background: var(--warn-bg); color: #f0a939; }
+  .st-deleted  { background: var(--surface-hover); color: #999; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+
+    <div class="page-header">
+        <div class="icon-badge"><i class="fa-solid fa-file-lines"></i></div>
+        <div style="flex: 1; min-width: 0;">
+            <h2>
+                {% if entry.type == 'api' %}API server log{% else %}{{ entry.kind or 'Job' }}{% endif %}
+                {% if entry.part == 'case' %}<span class="cell-sub">— case {{ entry.case_id }}</span>{% endif %}
+            </h2>
+            <p class="page-sub" style="word-break: break-all;"><code>{{ rel }}</code></p>
+        </div>
+        <div class="page-actions">
+            <a class="btn btn-secondary" href="{{ url_for('job_logs.index', embedded='1' if embedded else None) }}">
+                <i class="fa-solid fa-arrow-left"></i> All logs
+            </a>
+            {% if entry.part == 'case' %}
+            <a class="btn btn-secondary" href="{{ url_for('job_logs.view', rel=entry.log_file, embedded='1' if embedded else None) }}">
+                <i class="fa-solid fa-layer-group"></i> Whole batch log
+            </a>
+            {% endif %}
+            <a class="btn btn-primary" href="{{ url_for('job_logs.download', rel=rel) }}">
+                <i class="fa-solid fa-download"></i> Download
+            </a>
+        </div>
+    </div>
+
+    {% if entry.type != 'api' %}
+    <div class="card card--compact">
+        <dl class="meta-grid">
+            <dt>Status</dt>
+            <dd>
+                <span class="badge st-{{ entry.status }}" id="job-status">{{ entry.status or 'unknown' }}</span>
+                {% if entry.part == 'case' %}
+                {% set case = entry.cases.get(entry.case_id) or {} %}
+                &nbsp;case: <span class="badge st-{{ case.status }}" id="case-status">{{ case.status or 'unknown' }}</span>
+                {% endif %}
+            </dd>
+            <dt>Job ID</dt><dd>{{ entry.job_id }}</dd>
+            {% if entry.label %}<dt>{{ 'Tools' if entry.type == 'batch' else 'Task' }}</dt><dd>{{ entry.label }}</dd>{% endif %}
+            {% if entry.study_uid %}<dt>Study</dt><dd>{{ entry.study_uid }}</dd>{% endif %}
+            {% if entry.route %}<dt>Request</dt><dd>{{ entry.route }}</dd>{% endif %}
+            {% if entry.owner %}<dt>Owner</dt><dd>{{ entry.owner }}</dd>{% endif %}
+            {% if entry.started_at %}<dt>Started</dt><dd>{{ entry.started_at | localtime }}</dd>{% endif %}
+            {% if entry.finished_at %}<dt>Finished</dt><dd>{{ entry.finished_at | localtime }}{% if entry.duration_s is not none %} ({{ entry.duration_s | round(0) | int }} s){% endif %}</dd>{% endif %}
+            {% if entry.error %}<dt>Error</dt><dd class="meta-error">{{ entry.error }}</dd>{% endif %}
+            {% if entry.part == 'case' and (entry.cases.get(entry.case_id) or {}).error %}
+            <dt>Case error</dt><dd class="meta-error">{{ entry.cases.get(entry.case_id).error }}</dd>
+            {% endif %}
+        </dl>
+    </div>
+    {% endif %}
+
+    <div class="log-layout">
+        <div class="log-main">
+            <div class="log-toolbar">
+                <span id="log-state">
+                    {% if active %}<span class="live-dot"></span>Live{% else %}Finished{% endif %}
+                    &middot; <span id="log-size">{{ chunk.size | filesize }}</span>
+                    {% if chunk.truncated %}
+                    &middot; <span style="color: var(--warn);">showing the last {{ chunk.text | length | filesize }} only — download for the full log</span>
+                    {% endif %}
+                </span>
+                <span style="display:flex; gap:14px;">
+                    <label><input type="checkbox" id="follow" {% if active %}checked{% endif %}> Follow output</label>
+                    <label><input type="checkbox" id="wrap" checked> Wrap lines</label>
+                </span>
+            </div>
+            <pre class="log-output" id="log-output"></pre>
+        </div>
+
+        {% if entry.type == 'batch' and entry.cases %}
+        <div class="card card--compact case-list">
+            <div class="hint" style="margin: 0 0 6px;">Case logs ({{ entry.cases | length }})</div>
+            {% for case_id, case in entry.cases.items() %}
+            <a href="{{ url_for('job_logs.view', rel=case.log_file, embedded='1' if embedded else None) }}"
+               class="{% if case.log_file == rel %}current{% endif %}" title="{{ case.error or '' }}">
+                <span>{{ case_id }}</span>
+                {% if case.status %}<span class="badge st-{{ case.status }}">{{ case.status }}</span>{% endif %}
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    var output = document.getElementById('log-output');
+    var follow = document.getElementById('follow');
+    var wrap = document.getElementById('wrap');
+    var sizeEl = document.getElementById('log-size');
+    var stateEl = document.getElementById('log-state');
+    var statusEl = document.getElementById('job-status');
+    var caseStatusEl = document.getElementById('case-status');
+
+    var TAIL_URL = {{ url_for('job_logs.tail', rel=rel) | tojson }};
+    var offset = {{ chunk.offset | tojson }};
+    var active = {{ 'true' if active else 'false' }};
+    var POLL_MS = 3000;
+    var MAX_LINES = 50000;  // keep the DOM bounded on a very chatty live log
+
+    function lineClass(line) {
+        if (/\b(ERROR|CRITICAL)\b|Traceback \(most recent call last\)/.test(line)) return 'l-error';
+        if (/\bWARNING\b/.test(line)) return 'l-warn';
+        if (/\[stderr\]/.test(line)) return 'l-stderr';
+        if (/ (>>|<<|!!) |=====|--- Case /.test(line)) return 'l-stage';
+        if (/: \$ |docker run /.test(line)) return 'l-cmd';
+        return '';
+    }
+
+    function formatBytes(n) {
+        if (n < 1024) return n + ' B';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+        return (n / 1024 / 1024).toFixed(1) + ' MB';
+    }
+
+    function atBottom() {
+        return output.scrollHeight - output.scrollTop - output.clientHeight < 40;
+    }
+
+    function append(text) {
+        if (!text) return;
+        var stick = follow.checked || atBottom();
+        var lines = text.split('\n');
+        if (lines[lines.length - 1] === '') lines.pop();
+        var frag = document.createDocumentFragment();
+        lines.forEach(function (line) {
+            var span = document.createElement('span');
+            var cls = lineClass(line);
+            if (cls) span.className = cls;
+            span.textContent = line + '\n';
+            frag.appendChild(span);
+        });
+        output.appendChild(frag);
+        while (output.childNodes.length > MAX_LINES) output.removeChild(output.firstChild);
+        if (stick) output.scrollTop = output.scrollHeight;
+    }
+
+    function setBadge(el, status) {
+        if (!el || !status) return;
+        el.textContent = status;
+        el.className = 'badge st-' + status;
+    }
+
+    function poll() {
+        if (!active || !follow.checked) return;
+        fetch(TAIL_URL + '?offset=' + offset, { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data) return;
+                if (data.offset < offset) output.textContent = '';  // log was rotated/rewritten
+                append(data.text);
+                offset = data.offset;
+                sizeEl.textContent = formatBytes(data.size);
+                setBadge(statusEl, data.status);
+                setBadge(caseStatusEl, data.case_status);
+                if (!data.active) {
+                    active = false;
+                    stateEl.firstChild && stateEl.querySelector('.live-dot') && stateEl.querySelector('.live-dot').remove();
+                }
+            })
+            .catch(function () {});
+    }
+
+    wrap.addEventListener('change', function () {
+        output.style.whiteSpace = wrap.checked ? 'pre-wrap' : 'pre';
+    });
+    follow.addEventListener('change', function () {
+        if (follow.checked) { output.scrollTop = output.scrollHeight; poll(); }
+    });
+
+    append({{ chunk.text | tojson }});
+    output.scrollTop = output.scrollHeight;
+    setInterval(poll, POLL_MS);
+})();
+</script>
+{% endblock %}

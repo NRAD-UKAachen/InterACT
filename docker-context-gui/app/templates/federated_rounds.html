@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .fl-risk-box {
+    border-left: 4px solid var(--danger);
+    background: var(--danger-bg);
+    padding: 12px 16px;
+    margin: 12px 0;
+    font-size: 0.9rem;
+    border-radius: var(--radius-sm);
+  }
+  .fl-modal { max-width: 600px; margin: 40px auto; }
+  .fl-modal label { display: block; margin: 10px 0 4px; color: var(--text-dim); font-size: 0.9rem; }
+  .fl-check-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .fl-check-row input[type="checkbox"] { width: auto; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+  <h2><i class="fa-solid fa-network-wired"></i> Federated Learning -- Training Rounds</h2>
+
+  <div class="card">
+    <button class="btn btn-primary" onclick="document.getElementById('startModal').removeAttribute('hidden')">
+      <i class="fa-solid fa-plus"></i> Start New Federation
+    </button>
+    {% if is_admin %}
+    <button class="btn" style="float:right; color: var(--danger);" onclick="clearAllRuns()">
+      <i class="fa-solid fa-trash"></i> Clear All
+    </button>
+    {% endif %}
+
+    <table class="data-table" style="margin-top:16px;">
+      <thead>
+        <tr><th>Run ID</th><th>Model</th><th>Sites</th><th>Progress</th><th>Status</th><th>Actions</th></tr>
+      </thead>
+      <tbody>
+        {% for job in jobs %}
+        <tr data-run-id="{{ job.run_id }}" data-status="{{ job.status }}" data-is-coordinator="{{ 'true' if job.is_coordinator else 'false' }}">
+          <td><code>{{ job.run_id }}</code></td>
+          <td>{{ fl_models.get(job.model, {}).get('title', job.model) }}</td>
+          <td>{{ job.sites | join(', ') }}</td>
+          <td class="fl-round-cell">{{ job.current_round }}/{{ job.num_rounds }}</td>
+          <td class="fl-status-cell">
+            <span class="badge badge-{{ job.status }}">{{ job.status }}</span>
+            {% if job.status == 'failed' and job.error %}
+              <p style="font-size:0.75rem; color: var(--danger); margin: 4px 0 0;">{{ job.error }}</p>
+            {% endif %}
+            {% if job.status == 'success' %}
+              <p style="margin: 4px 0 0;">
+                <a href="{{ url_for('federated_rounds.download_deliverable', run_id=job.run_id) }}" class="btn" style="font-size:0.75rem; padding:2px 8px;">
+                  <i class="fa-solid fa-download"></i> Download results (.zip)
+                </a>
+              </p>
+              {% if job.final_model_undelivered %}
+              <p style="font-size:0.75rem; color: var(--danger); margin: 4px 0 0;">
+                Final model not delivered to: {{ job.final_model_undelivered.keys() | join(', ') }}.
+                {% if job.is_coordinator %}
+                <button class="btn" style="font-size:0.75rem; padding:2px 8px;" onclick="resendFinalModel('{{ job.run_id }}')">
+                  <i class="fa-solid fa-rotate-right"></i> Resend
+                </button>
+                {% endif %}
+              </p>
+              {% endif %}
+            {% endif %}
+          </td>
+          <td>
+            {% if job.status in ('submitted', 'running') %}
+              <button class="btn" style="font-size:0.75rem; padding:2px 8px; color: var(--danger);" onclick="cancelRound('{{ job.run_id }}')">
+                <i class="fa-solid fa-stop"></i> Cancel
+              </button>
+            {% elif is_admin %}
+              <button class="btn" style="font-size:0.75rem; padding:2px 8px; color: var(--danger);" onclick="deleteRound('{{ job.run_id }}')">
+                <i class="fa-solid fa-trash"></i> Clear
+              </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" style="color: var(--text-muted);">No federated training jobs yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div id="startModal" hidden class="card fl-modal">
+    <h3>Start New Federation</h3>
+    <div class="fl-risk-box">
+      Weight updates from every participating site will be combined for this job
+      using plain FedAvg (equal weight per site) and sent as plaintext without
+      encryption. Use HTTPS/VPN between instances if that traffic needs to be trusted.
+      Only sites that have granted training permission for the selected model
+      (see Instances) can be selected below. Before starting, make sure every site is connected and
+      agrees on labels and input images -- see <a href="{{ url_for('federated_rounds.how_to') }}">How To</a>.
+    </div>
+
+    <label for="modelSelect">Model</label>
+    <select id="modelSelect" class="form-control" onchange="onModelChange()">
+      {% for key, cfg in fl_models.items() %}
+        <option value="{{ key }}" data-local-dag="{{ cfg.local_dag_id }}">{{ cfg.title }}</option>
+      {% endfor %}
+    </select>
+    <p style="font-size:0.8rem; color: var(--text-muted); margin: 4px 0 12px;" id="modelDescription">
+      {{ (fl_models.values() | list)[0].description if fl_models else '' }}
+    </p>
+
+    <label>Participating remote instances</label>
+    {% for inst in instances %}
+      <div class="fl-check-row" id="remote-row-{{ inst.id }}" data-allowed-dags="{{ inst.allowed_dags | join(',') }}">
+        <input type="checkbox" class="remote-check" id="remote-{{ inst.id }}" value="{{ inst.id }}">
+        <label for="remote-{{ inst.id }}" style="margin:0;color:var(--text);">{{ inst.name }}</label>
+        <span class="fl-ineligible-note" style="display:none; font-size:0.75rem; color: var(--text-muted);">
+          (hasn't granted training permission for this model)
+        </span>
+      </div>
+    {% else %}
+      <p style="color: var(--text-muted);">No remote instances registered yet -- add one under Instances first.</p>
+    {% endfor %}
+
+    <div class="fl-check-row">
+      <input type="checkbox" id="trainLocalToo">
+      <label for="trainLocalToo" style="margin:0;color:var(--text);">Also train on this site's own local training data</label>
+    </div>
+
+    <label for="modality">Modality (must be the same at every site)</label>
+    <select id="modality" class="form-control">
+      <option value="CT">CT</option>
+      <option value="MRI">MRI</option>
+    </select>
+
+    <label for="numRounds">Number of rounds</label>
+    <input type="number" id="numRounds" class="form-control" value="10" min="1" step="1">
+
+    <label for="numLocalEpochs">Local epochs per round</label>
+    <input type="number" id="numLocalEpochs" class="form-control" value="1" min="1" step="1">
+
+    <div style="margin-top:18px;">
+      <button class="btn btn-primary" onclick="startRound()">Start</button>
+      <button class="btn" onclick="document.getElementById('startModal').setAttribute('hidden', '')">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const FL_MODELS = {{ fl_models | tojson }};
+
+function onModelChange() {
+  const select = document.getElementById('modelSelect');
+  const opt = select.selectedOptions[0];
+  const localDag = opt.dataset.localDag;
+
+  document.getElementById('modelDescription').textContent = FL_MODELS[select.value].description;
+
+  document.querySelectorAll('.fl-check-row').forEach(row => {
+    const allowed = (row.dataset.allowedDags || '').split(',');
+    const eligible = allowed.includes(localDag);
+    const checkbox = row.querySelector('.remote-check');
+    row.querySelector('.fl-ineligible-note').style.display = eligible ? 'none' : 'inline';
+    checkbox.disabled = !eligible;
+    if (!eligible) checkbox.checked = false;
+  });
+}
+
+async function startRound() {
+  const remoteIds = Array.from(document.querySelectorAll('.remote-check:checked')).map(el => el.value);
+  const trainLocalToo = document.getElementById('trainLocalToo').checked;
+  if (remoteIds.length === 0 && !trainLocalToo) {
+    alert("Select at least one eligible remote instance, or check \"Also train on this site's own local training data\".");
+    return;
+  }
+
+  const numRounds = Number(document.getElementById('numRounds').value);
+  const localEpochs = Number(document.getElementById('numLocalEpochs').value);
+  if (!Number.isInteger(numRounds) || numRounds < 1) {
+    alert("Number of rounds must be a whole number, at least 1.");
+    return;
+  }
+  if (!Number.isInteger(localEpochs) || localEpochs < 1) {
+    alert("Local epochs per round must be a whole number, at least 1.");
+    return;
+  }
+
+  const model = document.getElementById('modelSelect').value;
+
+  const config = {
+    model: model,
+    remote_instance_ids: remoteIds,
+    train_local_too: trainLocalToo,
+    modality: document.getElementById('modality').value,
+    num_rounds: numRounds,
+    local_epochs: localEpochs,
+  };
+
+  const fetchOptions = {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(config),
+  };
+
+  const resp = await fetch("{{ url_for('federated_rounds.start_round') }}", fetchOptions);
+  if (resp.ok) { location.reload(); } else { alert("Failed: " + (await resp.text())); }
+}
+
+async function cancelRound(runId) {
+  const row = document.querySelector(`tr[data-run-id="${runId}"]`);
+  const isCoordinator = row && row.dataset.isCoordinator === 'true';
+  const msg = isCoordinator
+    ? `Stop federation ${runId}? Any site currently mid-round will finish that round's work in the background, but this run won't wait for or use it -- and no further rounds will be started.`
+    : `Stop YOUR OWN participation in ${runId}? This does not stop the federation itself -- other sites keep going. If you're currently training, that finishes in the background, but its result won't be uploaded.`;
+  if (!confirm(msg)) return;
+  const url = "{{ url_for('federated_rounds.cancel_round', run_id='RUNID') }}".replace('RUNID', runId);
+  const resp = await fetch(url, { method: "POST" });
+  if (resp.ok) { location.reload(); } else { alert("Failed: " + (await resp.text())); }
+}
+
+async function resendFinalModel(runId) {
+  const url = "{{ url_for('federated_rounds.resend_final_model', run_id='RUNID') }}".replace('RUNID', runId);
+  const resp = await fetch(url, { method: "POST" });
+  if (!resp.ok) { alert("Failed: " + (await resp.text())); return; }
+  const result = await resp.json();
+  const failed = Object.entries(result.still_undelivered);
+  if (failed.length) {
+    alert("Still not delivered:\n" + failed.map(([site, err]) => `${site}: ${err}`).join("\n"));
+  }
+  location.reload();
+}
+
+async function deleteRound(runId) {
+  if (!confirm(`Permanently delete the history and downloaded model for ${runId}? This cannot be undone.`)) return;
+  const url = "{{ url_for('federated_rounds.delete_round', run_id='RUNID') }}".replace('RUNID', runId);
+  const resp = await fetch(url, { method: "POST" });
+  if (resp.ok) { location.reload(); } else { alert("Failed: " + (await resp.text())); }
+}
+
+async function clearAllRuns() {
+  if (!confirm("Permanently delete the history and downloaded models for every FINISHED federation run (success, failed, or cancelled)? This cannot be undone. Runs still in progress are left alone.")) return;
+  const resp = await fetch("{{ url_for('federated_rounds.clear_all') }}", { method: "POST" });
+  if (resp.ok) { location.reload(); } else { alert("Failed: " + (await resp.text())); }
+}
+
+document.addEventListener('DOMContentLoaded', onModelChange);
+
+// ---------- live status polling for jobs still in progress ----------
+const POLL_INTERVAL_MS = 5000;
+let pollTimer = null;
+
+function pendingRows() {
+  return Array.from(document.querySelectorAll('tr[data-run-id]'))
+    .filter(row => row.dataset.status === 'submitted' || row.dataset.status === 'running');
+}
+
+async function pollOnce() {
+  const rows = pendingRows();
+  if (!rows.length) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+    return;
+  }
+  await Promise.all(rows.map(async (row) => {
+    const runId = row.dataset.runId;
+    let job;
+    try {
+      const resp = await fetch(`/federated/rounds/${runId}/status.json`);
+      job = await resp.json();
+    } catch (e) {
+      return; // transient fetch/parse failure -- try again next tick, don't blow up the loop
+    }
+    if (!job.status) return;
+
+    row.dataset.status = job.status;
+    const roundCell = row.querySelector('.fl-round-cell');
+    if (roundCell && job.current_round !== undefined && job.num_rounds !== undefined) {
+      roundCell.textContent = `${job.current_round}/${job.num_rounds}`;
+    }
+    const statusCell = row.querySelector('.fl-status-cell');
+    if (statusCell) {
+      let html = `<span class="badge badge-${job.status}">${job.status}</span>`;
+      if (job.status === 'failed' && job.error) {
+        html += `<p style="font-size:0.75rem; color: var(--danger); margin: 4px 0 0;">${job.error}</p>`;
+      }
+      if (job.status === 'success') {
+        // Kept in sync by hand with the server-rendered version of this
+        // same block above (the one Jinja renders on page load) -- this
+        // JS copy is what makes the links appear live, the moment
+        // polling notices "success", instead of only after a refresh.
+        html += `<p style="margin: 4px 0 0;">` +
+          `<a href="/federated/rounds/${runId}/deliverable/download" class="btn" style="font-size:0.75rem; padding:2px 8px;"><i class="fa-solid fa-download"></i> Download results (.zip)</a>` +
+          `</p>`;
+        const undelivered = Object.keys(job.final_model_undelivered || {});
+        if (undelivered.length) {
+          const p = document.createElement('p');
+          p.style.cssText = 'font-size:0.75rem; color: var(--danger); margin: 4px 0 0;';
+          p.textContent = `Final model not delivered to: ${undelivered.join(', ')}. `;
+          if (row.dataset.isCoordinator === 'true') {
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.style.cssText = 'font-size:0.75rem; padding:2px 8px;';
+            btn.innerHTML = '<i class="fa-solid fa-rotate-right"></i> Resend';
+            btn.onclick = () => resendFinalModel(runId);
+            p.appendChild(btn);
+          }
+          statusCell.innerHTML = html;
+          statusCell.appendChild(p);
+          return;
+        }
+      }
+      statusCell.innerHTML = html;
+    }
+  }));
+}
+
+if (pendingRows().length) {
+  pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
+}
+</script>
+{% endblock %}

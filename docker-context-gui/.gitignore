@@ -1,0 +1,16 @@
+# Local build/scratch concerns for docker-context-gui only.
+#
+# PHI and secret rules for this directory (uploaded_*/, received/,
+# seg_results/, uids_logs/, nifti_inputs/, audit_logs/,
+# flask_sessions/, *.csv, client_secrets.json, .env) live in the repo-root
+# .gitignore, so PHI policy has one place to audit. Do not re-add them here.
+#
+# Several of those directories no longer have any code reading them -- the
+# upload and segmentation-viewer pages that wrote them are gone. The ignore
+# rules stay anyway: an existing deployment can still have patient data
+# sitting in them, and an ignore rule is the cheap side of that bet.
+
+# Virtualenvs / tooling
+.venv/
+venv/
+.zencoder/

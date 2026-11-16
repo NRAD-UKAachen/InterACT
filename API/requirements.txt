@@ -1,0 +1,52 @@
+# Pull PyTorch CUDA 12.1 wheels (compatible with a CUDA 12.2 host driver).
+# The default PyPI torch ships a cu12.6 build that needs a newer driver.
+--extra-index-url https://download.pytorch.org/whl/cu121
+
+blinker
+certifi
+charset-normalizer
+click
+dicomweb-client
+Flask
+highdicom
+idna
+importlib_resources
+itsdangerous
+Jinja2
+MarkupSafe
+matplotlib
+nibabel
+nii2dcm
+nilearn
+# dipy (a transitive dep of nilearn/brainles_preprocessing) dropped Python
+# 3.10 wheels as of 1.12.0; this image is python:3.10-slim with no C
+# compiler, so an unpinned resolve tries to build 1.12.0 from source and
+# fails. Pin to the last version with a cp310 wheel.
+dipy<1.12.0
+# brainles_preprocessing <=0.6.9 capped numpy<2, which is what kept this
+# image on numpy 1.x; 0.6.14 dropped that cap. Keep it explicitly so the
+# rest of the stack (torch 2.5.1, nnU-Net/TotalSegmentator, SynthSeg) is
+# not silently moved to numpy 2 by a rebuild.
+numpy<2
+packaging
+pillow
+pydicom
+pyjpegls
+pynrrd
+requests
+retrying
+scipy
+typing_extensions
+urllib3
+Werkzeug
+simpleITK
+pandas
+# Pin the cu121 build explicitly; the +cu121 local tag only exists on the
+# PyTorch index, so this forces the CUDA 12.1 wheel instead of the PyPI default.
+torch==2.5.1+cu121
+brats
+brats[preprocessing]
+# >=0.6.14: Zenodo removed links["archive"] from its records API, which
+# 0.6.9's fetch_atlases()/fetch_synthstrip() relied on (KeyError: 'archive').
+brainles_preprocessing==0.6.14
+TotalSegmentator

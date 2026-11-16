@@ -1,0 +1,403 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .fl-risk-box {
+    border-left: 4px solid var(--danger);
+    background: var(--danger-bg);
+    padding: 12px 16px;
+    margin: 12px 0;
+    font-size: 0.9rem;
+    border-radius: var(--radius-sm);
+  }
+
+  .fl-token-box {
+    font-family: monospace;
+    background: var(--surface-1);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    word-break: break-all;
+    margin: 8px 0;
+  }
+
+  .fl-dag-chip {
+    display: inline-block;
+    background: var(--surface-hover);
+    color: var(--text-dim);
+    border-radius: var(--radius-pill);
+    padding: 2px 10px;
+    margin: 2px;
+    font-size: 0.8rem;
+  }
+
+  .fl-modal {
+    max-width: 600px;
+    margin: 40px auto;
+  }
+
+  .fl-modal label {
+    display: block;
+    margin: 10px 0 4px;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+  }
+
+  .fl-outgoing-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .fl-outgoing-row input {
+    flex: 1;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+  <h2><i class="fa-solid fa-network-wired"></i> Federated Learning -- Instances</h2>
+
+  <div class="card">
+    <p style="font-size:0.85rem; color: var(--text-muted);">
+      Adding a remote generates a fresh token just for them -- send it to their
+      admin. They'll generate one back for you; paste that into their card's
+      "outgoing token" field below once you have it. See each card for details.
+    </p>
+    <button class="btn" onclick="copyLocalDefinition()">
+      <i class="fa-solid fa-copy"></i> Copy Base URL
+    </button>
+    <button class="btn btn-primary" onclick="document.getElementById('addRemoteModal').removeAttribute('hidden')">
+      <i class="fa-solid fa-plus"></i> Add Remote Instance
+    </button>
+
+    <div class="workflow-cards" style="display:flex;gap:20px;flex-wrap:wrap;margin-top:16px;">
+      {% for inst in instances %}
+      <div class="well well--tile">
+        <h4>
+          <i class="fa-solid {{ 'fa-house' if inst.role == 'local' else 'fa-cloud' }}"
+            style="{% if inst.role == 'remote' and inst.outgoing_token %}color: var(--success);{% endif %}"></i>
+          {{ inst.name }}
+          {% if inst.role == 'remote' %}
+          {% if inst.outgoing_token %}
+          <span class="badge badge-success" title="Their token is saved here -- you can call them.">Connected</span>
+          {% else %}
+          <span class="badge badge-warn" title="Their token isn't saved here yet -- paste it in below.">Pending</span>
+          {% endif %}
+          {% endif %}
+        </h4>
+        {% if inst.role == 'local' %}
+        <label style="font-size:0.8rem;color:var(--text-dim);">Name</label>
+        <div class="fl-outgoing-row">
+          <input type="text" class="form-control" id="local-name" value="{{ inst.name }}">
+        </div>
+        <label style="font-size:0.8rem;color:var(--text-dim);">Base URL (what partners use to reach you)</label>
+        <div class="fl-outgoing-row">
+          <input type="text" class="form-control" id="local-base-url" value="{{ inst.base_url }}">
+        </div>
+        <p style="font-size:0.75rem; color: var(--warn); margin-top:4px;">
+          Must be reachable from the PARTNER's network, not just your own --
+          an internal hostname (e.g. a Docker service name) or an address
+          that only resolves on your own site's DNS will fail once a round
+          actually runs. If you're not sure a hostname resolves for your
+          partner, use your real IP address instead.
+        </p>
+        <button class="btn" style="margin-top:8px;" onclick="saveLocalInstance()">Save</button>
+        {% endif %}
+        {% if inst.role == 'remote' %}
+        <p style="font-size: 0.8rem; color: var(--text-muted);">
+          registered by {{ inst.risk_acknowledged_by }} on {{ inst.risk_acknowledged_at[:10] }}
+        </p>
+        <label style="font-size:0.8rem;color:var(--text-dim);">Base URL</label>
+        <div class="fl-outgoing-row">
+          <input type="text" class="form-control" id="base-url-{{ inst.id }}" value="{{ inst.base_url }}">
+          <button class="btn" onclick="saveBaseUrl('{{ inst.id }}')">Save</button>
+        </div>
+        <label style="font-size:0.8rem;color:var(--text-dim);">
+          Outgoing token (the token THEY generated for you to call THEM)
+        </label>
+        <div class="fl-outgoing-row">
+          <input type="password" class="form-control" id="outgoing-{{ inst.id }}" value="{{ inst.outgoing_token }}"
+            placeholder="paste their token here">
+          <button class="btn" onclick="toggleReveal('outgoing-{{ inst.id }}', this)" title="Show/hide">
+            <i class="fa-solid fa-eye"></i>
+          </button>
+          <button class="btn" onclick="copyText(document.getElementById('outgoing-{{ inst.id }}').value)" title="Copy">
+            <i class="fa-solid fa-copy"></i>
+          </button>
+          <button class="btn" onclick="saveOutgoingToken('{{ inst.id }}')">Save</button>
+        </div>
+        {% if not inst.outgoing_token %}
+        <p style="font-size:0.75rem; color: var(--warn);">
+          Not set yet -- calls TO this instance (triggering training, etc.)
+          won't authenticate until you paste their token in.
+        </p>
+        {% endif %}
+
+        {#
+        Rotation reminder UI, disabled for now -- it only ever shows a
+        passive badge on this page when you happen to visit it (no email,
+        no push notification, nothing actively alerts anyone), so it
+        wasn't doing much. Kept here, commented out, in case a real
+        notification mechanism gets built later. Rotate Token itself
+        stays active below regardless of this.
+
+        <label style="font-size:0.8rem;color:var(--text-dim); margin-top:12px;">
+          Token this remote uses to call YOU -- rotation reminder
+        </label>
+        {% if inst.rotation %}
+        <p style="font-size:0.75rem; margin: 2px 0 6px;">
+          {% if inst.rotation.due %}
+          <span class="badge badge-danger">Rotation recommended</span>
+          issued {{ inst.rotation.days_since }} day(s) ago (every {{ inst.rotation.reminder_days }})
+          {% elif inst.rotation.reminder_days %}
+          <span style="color: var(--text-muted);">
+            issued {{ inst.rotation.days_since }} day(s) ago -- next reminder at {{ inst.rotation.reminder_days }} days
+          </span>
+          {% else %}
+          <span style="color: var(--text-muted);">no reminder set -- won't be flagged for rotation</span>
+          {% endif %}
+        </p>
+        {% endif %}
+        <div class="fl-outgoing-row">
+          <select class="form-control" id="reminder-{{ inst.id }}" style="flex:0 0 auto;">
+            <option value="7" {% if inst.reminder_days==7 %}selected{% endif %}>remind every 7 days</option>
+            <option value="30" {% if inst.reminder_days==30 %}selected{% endif %}>remind every 30 days</option>
+            <option value="90" {% if inst.reminder_days==90 %}selected{% endif %}>remind every 90 days</option>
+            <option value="" {% if not inst.reminder_days %}selected{% endif %}>never remind</option>
+          </select>
+          <button class="btn" onclick="saveReminderDays('{{ inst.id }}')">Save</button>
+        </div>
+        #}
+
+        {% endif %}
+        {% if inst.role == 'remote' %}
+        <p><strong>Training Permissions:</strong></p>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+          {% for model_key, cfg in fl_models.items() %}
+          {% set is_allowed = cfg.local_dag_id in inst.allowed_dags %}
+          <span class="fl-dag-chip" style="display:inline-flex; align-items:center; gap:6px;{% if not is_allowed %} opacity:0.6;{% endif %}">
+            {{ cfg.title }}
+            <a href="javascript:void(0)"
+               style="font-size:0.85em; text-decoration:underline; cursor:pointer; color: {{ 'var(--danger)' if is_allowed else 'var(--info)' }};"
+               onclick="toggleDag('{{ inst.id }}', {{ inst.allowed_dags | tojson | forceescape }}, '{{ cfg.local_dag_id }}')">{{ 'Revoke' if is_allowed else 'Allow' }}</a>
+          </span>
+          {% endfor %}
+        </div>
+        <span
+          style="display:inline-flex; align-items:center; gap:16px; margin-top:14px; padding-top:12px; border-top:1px solid var(--border);">
+          <span style="display:inline-flex; align-items:center; gap:4px;">
+            <button class="btn" onclick="rotateToken('{{ inst.id }}', {{ inst.name | tojson | forceescape }})">
+              <i class="fa-solid fa-rotate"></i> Rotate Token
+            </button>
+            <span style="display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px;
+                         border:1px solid var(--text-muted); border-radius:50%; color:var(--text-muted);
+                         font-size:0.65rem; line-height:1; cursor:help; font-style:italic;"
+              title="Rotating replaces the token this remote uses to call you, their old one stops working immediately.">i</span>
+          </span>
+          <button class="btn btn-danger" onclick="deleteInstance('{{ inst.id }}')">Delete Instance</button>
+        </span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div id="addRemoteModal" hidden class="card fl-modal">
+    <h3>Add Remote Instance</h3>
+    <div class="fl-risk-box">
+      <strong>Before adding this instance:</strong> pairing grants this instance
+      everything registered here can do. That includes Federated Learning (model
+      weight updates, not raw data -- though weight updates are known to sometimes
+      leak information about the underlying training data, a documented weakness
+      of plain federated averaging). Only connect with an institution you trust
+      with that.
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" id="riskAck" style="width:auto;">
+      I understand this risk and trust the operator of this instance.
+    </label>
+
+    <label for="remoteName">Name</label>
+    <input type="text" id="remoteName" class="form-control">
+
+    <label for="remoteBaseUrl">Base URL</label>
+    <input type="text" id="remoteBaseUrl" class="form-control" placeholder="https://partner-site.example.org">
+    <p style="font-size:0.75rem; color: var(--text-muted);">
+      Get this from the partner -- must be an address reachable from YOUR
+      network, exactly as they gave it to you via "Copy Base URL".
+      If a hostname doesn't resolve for you, ask them for their real IP
+      instead before adding them.
+    </p>
+
+    <label for="theirOutgoingToken">Their token for you (required before this connection works both ways -- leave blank
+      now if you don't have it yet, and paste it in from their card once you get it)</label>
+    <input type="text" id="theirOutgoingToken" class="form-control">
+
+    <div style="margin-top:18px;">
+      <button class="btn btn-primary" onclick="submitAddRemote()">Add Remote Instance</button>
+      <button class="btn" onclick="document.getElementById('addRemoteModal').setAttribute('hidden', '')">Cancel</button>
+    </div>
+  </div>
+
+  <div id="tokenResultModal" hidden class="card fl-modal">
+    <h3 id="tokenResultTitle">Remote instance added</h3>
+    <p>Send this token to their admin -- they need it to call you. It's shown here
+      once and never again; if it's lost, rotate the token (or delete and re-add
+      this instance) to generate a new one.</p>
+    <div class="fl-token-box" id="tokenResultBox"></div>
+    <button class="btn" onclick="copyText(document.getElementById('tokenResultBox').textContent)">
+      <i class="fa-solid fa-copy"></i> Copy
+    </button>
+    <button class="btn btn-primary" onclick="location.reload()">Done</button>
+  </div>
+</div>
+
+<script>
+  // navigator.clipboard only exists in a "secure context" (HTTPS, or
+  // localhost) -- on a plain-HTTP deployment like this one it's undefined,
+  // so calling it throws immediately and silently (no try/catch = no
+  // visible error, the button just appears to do nothing). Falls back to
+  // the older execCommand('copy') trick, which works over plain HTTP; if
+  // even that fails (very old/locked-down browser), shows the text
+  // selected in a prompt so the user can copy it by hand instead of the
+  // action just silently failing.
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch (e) {
+      ok = false;
+    }
+    document.body.removeChild(textarea);
+    if (!ok) {
+      window.prompt('Copy failed automatically -- copy this manually (Ctrl/Cmd+C):', text);
+    }
+    return ok;
+  }
+
+  async function copyLocalDefinition() {
+    const resp = await fetch("{{ url_for('federated_instances.local_definition') }}");
+    const data = await resp.json();
+    await copyText(data.base_url);
+    alert("Copied -- send this URL to your partner's admin so they can address you " +
+      "(they pick whatever name they want to call you; no secret in this, the token " +
+      "comes from 'Add Remote Instance').");
+  }
+
+  async function submitAddRemote() {
+    if (!document.getElementById('riskAck').checked) {
+      alert("Please confirm you understand the risk before adding this instance.");
+      return;
+    }
+    const body = {
+      risk_acknowledged: true,
+      name: document.getElementById('remoteName').value,
+      base_url: document.getElementById('remoteBaseUrl').value,
+      their_outgoing_token: document.getElementById('theirOutgoingToken').value,
+    };
+    const resp = await fetch("{{ url_for('federated_instances.add_remote') }}", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (!resp.ok) { alert("Failed: " + (await resp.text())); return; }
+    const result = await resp.json();
+    document.getElementById('addRemoteModal').setAttribute('hidden', '');
+    document.getElementById('tokenResultTitle').textContent = 'Remote instance added';
+    document.getElementById('tokenResultBox').textContent = result.incoming_token_for_them;
+    document.getElementById('tokenResultModal').removeAttribute('hidden');
+  }
+
+  function toggleReveal(inputId, btn) {
+    const input = document.getElementById(inputId);
+    const icon = btn.querySelector('i');
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    icon.className = showing ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash';
+  }
+
+  /* Unused while the rotation reminder UI above is commented out.
+  async function saveReminderDays(instanceId) {
+    const raw = document.getElementById(`reminder-${instanceId}`).value;
+    const resp = await fetch(`/federated/instances/${instanceId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reminder_days: raw === '' ? null : parseInt(raw, 10) }),
+    });
+    if (resp.ok) { location.reload(); } else { alert("Failed: " + (await resp.text())); }
+  }
+  */
+
+  async function rotateToken(instanceId, name) {
+    if (!confirm(`Generate a new token for ${name}? Their old token stops working ` +
+      `immediately -- they'll need the new one before they can call you again.`)) return;
+    const resp = await fetch(`/federated/instances/${instanceId}/rotate`, { method: "POST" });
+    if (!resp.ok) { alert("Failed: " + (await resp.text())); return; }
+    const result = await resp.json();
+    document.getElementById('tokenResultTitle').textContent = 'Token rotated';
+    document.getElementById('tokenResultBox').textContent = result.incoming_token_for_them;
+    document.getElementById('tokenResultModal').removeAttribute('hidden');
+  }
+
+  async function saveBaseUrl(instanceId) {
+    const value = document.getElementById(`base-url-${instanceId}`).value.trim();
+    const resp = await fetch(`/federated/instances/${instanceId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ base_url: value }),
+    });
+    if (resp.ok) { location.reload(); } else { alert("Failed: " + (await resp.text())); }
+  }
+
+  async function saveOutgoingToken(instanceId) {
+    const value = document.getElementById(`outgoing-${instanceId}`).value.trim();
+    const resp = await fetch(`/federated/instances/${instanceId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outgoing_token: value }),
+    });
+    if (resp.ok) { location.reload(); } else { alert("Failed: " + (await resp.text())); }
+  }
+
+  async function saveLocalInstance() {
+    const body = {
+      name: document.getElementById('local-name').value,
+      base_url: document.getElementById('local-base-url').value,
+    };
+    const resp = await fetch("{{ url_for('federated_instances.update_local') }}", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (resp.ok) { location.reload(); } else { alert("Failed: " + (await resp.text())); }
+  }
+
+  async function toggleDag(instanceId, currentAllowedDags, dagId) {
+    // Add/remove just this one DAG -- must not clobber other models this
+    // instance already allowed (a real bug with >1 registered model: an
+    // earlier version replaced the whole list instead of editing one entry).
+    const newAllowed = currentAllowedDags.includes(dagId)
+      ? currentAllowedDags.filter(d => d !== dagId)
+      : [...currentAllowedDags, dagId];
+    const resp = await fetch(`/federated/instances/${instanceId}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ allowed_dags: newAllowed }),
+    });
+    if (resp.ok) { location.reload(); } else { alert("Failed: " + (await resp.text())); }
+  }
+
+  async function deleteInstance(instanceId) {
+    if (!confirm("Delete this remote instance? Its jobs will be left in place.")) return;
+    const resp = await fetch(`/federated/instances/${instanceId}`, { method: "DELETE" });
+    if (resp.ok) { location.reload(); } else { alert("Failed: " + (await resp.text())); }
+  }
+</script>
+{% endblock %}

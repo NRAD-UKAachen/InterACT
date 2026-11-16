@@ -1,0 +1,134 @@
+# Keycloak: the identity provider every other stack authenticates against.
+# Part of the InterACT Compose project -- start it from the repo root
+# (`docker compose up -d`), not from this directory. All values come from the
+# root .env; see .env.example.
+
+services:
+  keycloak-db:
+    image: postgres:15
+    container_name: ${STACK_NAME:-interact}-keycloak-db
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: "${KC_DB_PASSWORD:?Set KC_DB_PASSWORD in the root .env}"
+    volumes:
+      - keycloak_pgdata:/var/lib/postgresql/data
+    networks:
+      - interact-auth
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  keycloak-dev:
+    image: quay.io/keycloak/keycloak:24.0.2
+    container_name: ${STACK_NAME:-interact}-keycloak-dev
+    # --import-realm is required for start-dev to actually read anything
+    # placed in /opt/keycloak/data/import/ (interact-realm.json below) --
+    # without it Keycloak silently ignores the mount and only the built-in
+    # "master" realm exists, which is why oauth2-proxy and the portal's login
+    # both 404 with "Realm does not exist".
+    #
+    # The import only ever CREATES the realm. If interact-realm already exists
+    # in the database (keycloak_pgdata), Keycloak skips the file entirely, on
+    # every start. So an edit to interact-realm.json reaches a fresh install
+    # only; on a running one, make the same change in the admin console
+    # (or with kcadm.sh) as well.
+    command: ["start-dev", "--hostname-strict=false", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: "${KEYCLOAK_ADMIN:-admin}"
+      KEYCLOAK_ADMIN_PASSWORD: "${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in the root .env}"
+
+      # Switch DB from H2 to Postgres
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-db
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: "${KC_DB_PASSWORD:?Set KC_DB_PASSWORD in the root .env}"
+
+      # Client secrets consumed by interact-realm.json
+      # via its ${*} placeholders (Keycloak's realm-import placeholder
+      # syntax is bare ${VAR}, NOT the ${env.VAR} MicroProfile syntax used in
+      # keycloak.conf -- the latter is never substituted in realm JSON and
+      # was silently importing as a literal, invalid string). Keep these
+      # secrets out of the tracked realm export -- that file is readable by
+      # everyone with repo access.
+      #
+      # Each secret is ONE variable used in two places: here, where the realm
+      # import creates the client with it, and in the service that
+      # authenticates with it (the portal for flask-gui, both oauth2-proxies
+      # for ohif-viewer, irods-http-api for its own introspection calls -
+      # see IRODS/http_api/config.json.template). They cannot drift apart.
+      #
+      # irods-http-api and its irods-audience client scope are defined here in
+      # the realm import, not created out-of-band by a setup script. That
+      # covers fresh installs; an existing realm is never re-imported (see
+      # --import-realm above), so there they have to be added by hand
+      # (create-irods-client.sh covers the client, not the scope).
+      KC_FLASK_GUI_SECRET: "${OIDC_GUI_CLIENT_SECRET:?Set OIDC_GUI_CLIENT_SECRET in the root .env}"
+      KC_OHIF_VIEWER_SECRET: "${OIDC_OHIF_CLIENT_SECRET:?Set OIDC_OHIF_CLIENT_SECRET in the root .env}"
+      KC_IRODS_HTTP_API_SECRET: "${IRODS_OIDC_CLIENT_SECRET:?Set IRODS_OIDC_CLIENT_SECRET in the root .env}"
+
+      # Public URLs, also consumed by interact-realm.json's ${*} placeholders
+      # for the clients' rootUrl / redirectUris / webOrigins. Everything
+      # derives from PUBLIC_HOST in the root .env.
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY: "none"
+      KC_HOSTNAME_URL: "${KEYCLOAK_BASE_URL}"
+      KC_HOSTNAME_ADMIN_URL: "${KEYCLOAK_BASE_URL}"
+      PORTAL_BASE_URL: "${PORTAL_BASE_URL}"
+      OHIF_BASE_URL: "${OHIF_BASE_URL}"
+      # The dcm4chee admin UI's oauth2-proxy (:1082) logs in through the
+      # ohif-viewer client too, so its callback is one of that client's
+      # redirectUris.
+      DCM4CHEE_ADMIN_BASE_URL: "${DCM4CHEE_ADMIN_BASE_URL}"
+
+      # SMTP config for password-reset / verification mails (realm reads these
+      # via bare ${KC_SMTP_*} placeholders in interact-realm.json -- the
+      # defaults live here, since the placeholders carry none).
+      # Leave KC_SMTP_HOST empty in .env to disable mail entirely.
+      KC_SMTP_HOST: "${KC_SMTP_HOST:-}"
+      KC_SMTP_PORT: "${KC_SMTP_PORT:-587}"
+      KC_SMTP_FROM: "${KC_SMTP_FROM:-}"
+      KC_SMTP_USER: "${KC_SMTP_USER:-}"
+      KC_SMTP_PASSWORD: "${KC_SMTP_PASSWORD:-}"
+      KC_SMTP_AUTH: "${KC_SMTP_AUTH:-true}"
+      KC_SMTP_STARTTLS: "${KC_SMTP_STARTTLS:-true}"
+      KC_SMTP_SSL: "${KC_SMTP_SSL:-false}"
+
+    ports:
+      - "${PORT_KEYCLOAK:-8081}:8080"
+
+    # Mounts only for import/export artifacts and the custom login theme
+    volumes:
+      - ./interact-realm.json:/opt/keycloak/data/import/interact-realm.json
+      # InterACT-branded login theme (see themes/interact/login). start-dev
+      # keeps theme caching off, so CSS edits show on a browser refresh.
+      - ./themes/interact:/opt/keycloak/themes/interact
+
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+
+    networks:
+      - interact-auth
+    restart: unless-stopped
+
+# Explicit name, like the networks: without it Compose prefixes the project
+# name, so merging the stacks into one project would have silently created a
+# NEW, EMPTY volume and Keycloak would have come up with no realm, no users and
+# no clients. Pinned to STACK_NAME rather than a bare literal so a second
+# stack (different STACK_NAME) gets its own volume instead of sharing this one.
+volumes:
+  keycloak_pgdata:
+    name: ${STACK_NAME:-interact}-keycloak-pgdata
+
+# Declared identically in every stack file and in the root docker-compose.yml.
+# `include:` merges these top-level blocks, so they must agree exactly; the
+# shared names replace the old project-prefixed `nginx-dcm4chee_default`.
+networks:
+  interact-auth:
+    name: ${STACK_NAME:-interact}-auth
+    driver: bridge

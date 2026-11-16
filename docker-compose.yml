@@ -1,0 +1,64 @@
+# =============================================================================
+# InterACT -- the whole platform, one file.
+#
+#   cp .env.example .env && $EDITOR .env
+#   docker compose up -d
+#
+# Configuration lives in .env next to this file. Nothing in the subdirectories
+# needs editing; Compose interpolates .env into every file pulled in below.
+#
+# The stacks stay in their own directories rather than being merged into one
+# giant service list -- each keeps its own comments, and `include:` gives us a
+# single Compose project regardless.
+#
+# What comes up by default is the working portal: Keycloak, the dcm4chee PACS,
+# the OHIF viewer behind oauth2-proxy, the InterACT portal and the processing
+# API. The heavier optional subsystems sit behind profiles:
+#
+#   docker compose --profile irods    up -d    # iRODS data management
+#   docker compose --profile airflow  up -d    # federated-learning orchestration
+#   docker compose --profile saminrad up -d    # SAM2 interactive segmentation
+#   docker compose --profile ldct     up -d    # low-dose CT simulation
+#   docker compose --profile all      up -d    # everything
+#
+# Profiles are additive and safe to re-run: bringing one up leaves the core
+# services alone.
+# =============================================================================
+
+name: ${STACK_NAME:-interact}
+
+include:
+  # Order is documentation, not dependency -- Compose builds the graph from
+  # depends_on and starts what it can in parallel. It reads top to bottom the
+  # way the system layers: identity, then storage, then the apps on top.
+  - path: keycloak-dev/docker-compose.yml
+  - path: viewers/platform/app/.recipes/Nginx-Dcm4chee/docker-compose.yml
+  - path: API/docker-compose.yml
+  - path: docker-context-gui/docker-compose.yml
+  - path: IRODS/docker-compose.yml
+  - path: airflow/docker-compose.yml
+  - path: docker-context-saminrad/docker-compose.yml
+  - path: LDCT_Alsaihati/docker-compose.yml
+
+# The three shared networks are OWNED here and consumed as `external` by the
+# included files. That indirection is deliberate: they used to be created by
+# whichever stack happened to declare them first and were then referenced by
+# their project-prefixed name (`nginx-dcm4chee_default`), which only worked
+# while each directory was its own Compose project. Declaring them here gives
+# them stable names that do not depend on the Compose project name -- only on
+# STACK_NAME, so a second stack with a different STACK_NAME gets its own three
+# networks instead of silently joining these ones.
+#
+# Consequence: a stack is no longer startable from its own directory unless the
+# networks already exist. Bring the project up from here, or create them by hand
+# with `docker network create ${STACK_NAME:-interact}-dcm4chee` etc.
+networks:
+  interact-dcm4chee:
+    name: ${STACK_NAME:-interact}-dcm4chee
+    driver: bridge
+  interact-auth:
+    name: ${STACK_NAME:-interact}-auth
+    driver: bridge
+  interact-irods:
+    name: ${STACK_NAME:-interact}-irods
+    driver: bridge

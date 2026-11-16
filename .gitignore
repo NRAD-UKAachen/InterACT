@@ -1,0 +1,160 @@
+# =============================================================================
+# Never commit patient data or secrets; all such rules are in this file.
+# =============================================================================
+
+# --- Secrets: never commit rendered config, only the .template files ---
+docker-context-gui/client_secrets.json
+!docker-context-gui/client_secrets.json.template
+.env
+*.env
+!.env.example
+keycloak-dev/users.csv
+keycloak-dev/credentials-*.txt
+
+# --- User-supplied credentials: secrets/ holds files each deployment brings
+# its own copy of. Only the READMEs explaining how to obtain them are tracked.
+secrets/**
+!secrets/**/
+!secrets/**/README.md
+!secrets/**/.gitkeep
+
+license.txt
+.license
+fs_license
+
+# --- Patient data: keep imaging + identifier exports out of the repo ---
+# DICOM/NIfTI inboxes and analysis outputs hold identifiable patient data.
+docker-context-gui/**/uploaded_dicom/
+docker-context-gui/**/uploaded_nifti/
+docker-context-gui/**/uploaded_nrrd/
+docker-context-gui/**/received/
+docker-context-gui/**/spm_fsl_analyses/
+docker-context-gui/**/uids_logs/
+# nifti_inputs/, seg_results/ and plots/ exist both as PHI drop dirs and as
+# app-managed output dirs that need their .gitkeep tracked, so ignore the
+# contents rather than the directory itself.
+docker-context-gui/**/nifti_inputs/*
+!docker-context-gui/**/nifti_inputs/.gitkeep
+docker-context-gui/**/seg_results/*
+!docker-context-gui/**/seg_results/.gitkeep
+docker-context-gui/**/plots/*
+!docker-context-gui/**/plots/.gitkeep
+# PHI access audit trail: names both the patients accessed and the colleagues
+# who accessed them. Must be backed up, must never be committed.
+docker-context-gui/**/audit_logs/
+# Server-side Flask sessions: these files contain live Keycloak access and
+# refresh tokens. Never commit them.
+docker-context-gui/**/flask_sessions/
+# FL data. The directories themselves are tracked via .gitkeep (a missing
+# bind-mount source is created as root); everything in them is patient data
+# or run output and never is.
+airflow/data/workflows/*
+!airflow/data/workflows/.gitkeep
+airflow/data/fl_local_training_data/*
+!airflow/data/fl_local_training_data/.gitkeep
+# CSV exports of PACS queries carry PatientName / PatientID / StudyDate.
+docker-context-gui/*.csv
+*.dcm
+
+# Specific directories to ignore
+API_storage/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+# Anchored to the repo root: an unanchored 'lib/' also matched real OHIF
+# source (platform/core/src/services/HangingProtocolService/lib/,
+# platform/ui-next/src/lib/). Virtualenv lib dirs are covered by .venv/venv.
+/lib/
+/lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+.venv
+venv/
+ENV/
+env/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.cover
+.hypothesis/
+
+# Node.js
+node_modules/
+.npm
+.eslintcache
+.yarn-integrity
+*.tsbuildinfo
+.next/
+out/
+
+# Docker
+.env.local
+.env.*.local
+
+# IDE
+.vscode/*
+.claude/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+
+# Logs
+logs/
+*.log
+
+!airflow/logs/
+!airflow/logs/.gitkeep
+
+airflow/logs/*/
+!airflow/plugins/
+!airflow/plugins/.gitkeep
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+temp/
+tmp/
+*.cache
+
+# =============================================================================
+
+docker-context-saminrad/checkpoints/*
+!docker-context-saminrad/checkpoints/.gitkeep
+# Local runtime overrides for that container (secret key, HOST_UID).
+docker-context-saminrad/.env
+
+

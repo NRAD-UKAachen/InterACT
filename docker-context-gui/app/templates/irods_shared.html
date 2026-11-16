@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  /* Shared-with-me listing: only the link/path cell treatment is specific
+     here - tabs, cards, tables, badges and buttons are all shared now. */
+  .card { padding: 20px 22px 4px; }
+  .data-table a {
+    color: var(--text); text-decoration: none; font-weight: 600;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .data-table a i { color: var(--green); width: 18px; text-align: center; }
+  .data-table a:hover span { text-decoration: underline; }
+  .data-table .path-cell { color: var(--text-muted); font-family: monospace; font-size: 0.85rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+
+    <div class="tab-container">
+        <a href="{{ url_for('irods_browser.index', embedded=('1' if embedded else none), picker=picker) }}"
+           class="{{ 'active' if request.endpoint in ['irods_browser.index', 'irods_browser.browse'] else '' }}">
+            <i class="fa-solid fa-folder-open"></i> Files
+        </a>
+        <a href="{{ url_for('irods_browser.shared', embedded=('1' if embedded else none), picker=picker) }}"
+           class="{{ 'active' if request.endpoint == 'irods_browser.shared' else '' }}">
+            <i class="fa-solid fa-share-nodes"></i> Shared with me
+        </a>
+    </div>
+
+    <p class="hint">
+        Folders and files other people have given you access to. They don't appear under
+        <em>Files</em> because iRODS access is granted per folder - having access
+        to someone's project folder doesn't let you browse the rest of their files
+        to reach it.
+    </p>
+
+    <div class="card card--flush">
+        {% if entries %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Full path</th>
+                    <th>Your access</th>
+                    <th class="col-actions"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                <tr>
+                    <td>
+                        {% if entry.type == 'data_object' %}
+                        <a href="{{ url_for('irods_browser.download', rel_path=entry.path.strip('/')) }}">
+                            <i class="fa-solid fa-file"></i> <span>{{ entry.name }}</span>
+                        </a>
+                        {% else %}
+                        <a href="{{ url_for('irods_browser.browse', rel_path=entry.path.strip('/'), embedded=('1' if embedded else none), picker=picker) }}">
+                            <i class="fa-solid fa-folder"></i> <span>{{ entry.name }}</span>
+                        </a>
+                        {% endif %}
+                    </td>
+                    <td class="path-cell">{{ entry.path }}</td>
+                    <td><span class="badge {{ 'badge-own' if entry.permission == 'own' else ('badge-write' if entry.permission in ['write', 'modify_object'] else '') }}">{{ entry.permission }}</span></td>
+                    <td class="col-actions">
+                        {% if entry.type == 'data_object' %}
+                        <a class="icon-btn" title="Download" href="{{ url_for('irods_browser.download', rel_path=entry.path.strip('/')) }}">
+                            <i class="fa-solid fa-download"></i>
+                        </a>
+                        {% else %}
+                        <a class="icon-btn" title="Download folder as ZIP" href="{{ url_for('irods_browser.download_folder', rel_path=entry.path.strip('/'), embedded=('1' if embedded else none), picker=picker) }}">
+                            <i class="fa-solid fa-file-zipper"></i>
+                        </a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty-state">Nothing has been shared with you yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

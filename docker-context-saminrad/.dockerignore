@@ -1,0 +1,30 @@
+# Laufzeitdaten und Modellgewichte kommen als Volume, nicht ins Image.
+data/
+checkpoints/
+
+# Virtuelle Umgebungen
+myenv/
+venv/
+env/
+
+# Git & Caches
+.git/
+.gitignore
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+
+# Logs
+*.log
+logs/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets nicht ins Image backen
+.env

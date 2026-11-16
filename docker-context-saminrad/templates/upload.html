@@ -1,0 +1,1144 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interaktive Segmentierung - Datenquelle wählen</title>
+    <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
+    <style>
+        /* InterACT-Design (siehe docker-context-gui/app/static/style.css):
+           schwarze Flaeche, #262626-Karte, Gruen als einzige Primaerfarbe,
+           Pill-Buttons. Nur Optik - Markup und Skript sind unveraendert. */
+        :root {
+            --green: #669900;
+            --green-dark: #567f00;
+
+            --page-bg: #000000;
+            --card-bg: #262626;
+            --surface-2: #1f1f1f;
+            --surface-1: #1a1a1a;
+            --surface-hover: #3a3a3a;
+
+            --border: #333333;
+            --border-strong: #3a3a3a;
+
+            --text: #ffffff;
+            --text-dim: #cccccc;
+            --text-muted: #999999;
+            --text-faint: #888888;
+
+            --info: #6ab0e6;
+
+            --radius: 12px;
+            --radius-sm: 8px;
+            --radius-pill: 20px;
+
+            /* Alt-Namen als Aliase, damit keine Regel ins Leere greift. */
+            --primary-color: var(--green);
+            --primary-dark: var(--green-dark);
+            --secondary-color: var(--surface-hover);
+            --secondary-dark: #474747;
+            --success-color: var(--green);
+            --success-dark: var(--green-dark);
+            --light-bg: var(--surface-2);
+            --border-color: var(--border);
+            --text-primary: var(--text);
+            --text-secondary: var(--text-muted);
+            --border-radius: var(--radius-sm);
+            --shadow-sm: none;
+            --shadow-md: 0 8px 28px rgba(0, 0, 0, 0.55);
+        }
+        * { box-sizing: border-box; }
+        html { color-scheme: dark; }
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            background-color: var(--page-bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        /* Kopfzeile wie die .page-header des GUI: schmal, schwarz, ruhig. */
+        h1 {
+            text-align: left;
+            padding: 16px 24px;
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            color: var(--text);
+            background-color: var(--page-bg);
+            border-bottom: 1px solid var(--border);
+        }
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            flex-grow: 1;
+        }
+        .main-card {
+            background: var(--card-bg);
+            border-radius: var(--radius);
+            box-shadow: none;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            animation: fadeIn 0.5s ease-out;
+        }
+        .card-header {
+            padding: 22px 24px;
+            text-align: left;
+            background-color: transparent;
+            border-bottom: 1px solid var(--border);
+        }
+        .card-header h2 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            margin: 0 0 6px 0;
+            color: var(--text);
+        }
+        .card-header p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin: 0;
+        }
+        .card-body {
+            padding: 22px 24px;
+        }
+        #drop-zone {
+            padding: 2.5rem;
+            border: 2px dashed var(--border-strong);
+            border-radius: var(--radius-sm);
+            background-color: var(--surface-1);
+            text-align: center;
+            transition: border-color 0.15s ease, background 0.15s ease;
+            margin-bottom: 1.5rem;
+        }
+        #drop-zone.drag-over {
+            border-color: var(--green);
+            background-color: rgba(102, 153, 0, 0.08);
+        }
+        .upload-icon {
+            width: 48px;
+            height: 48px;
+            color: var(--green);
+            margin-bottom: 1rem;
+        }
+        .upload-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text);
+        }
+        .upload-description {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin-bottom: 1.5rem;
+        }
+        .button-group {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-bottom: 1.5rem;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            height: 40px;
+            padding: 0 18px;
+            background-color: var(--green);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-pill);
+            cursor: pointer;
+            font-size: 0.88rem;
+            font-weight: 600;
+            font-family: inherit;
+            text-decoration: none;
+            white-space: nowrap;
+            transition: background 0.15s ease;
+        }
+        .btn:hover {
+            background-color: var(--green-dark);
+            border-color: transparent;
+        }
+        .btn.secondary {
+            background-color: var(--surface-hover);
+            color: var(--text);
+            border-color: transparent;
+            font-weight: 500;
+        }
+        .btn.secondary:hover {
+            background-color: #474747;
+            border-color: transparent;
+        }
+        .file-input { display: none; }
+        .file-name-display {
+            margin-top: 1.5rem;
+            padding: 11px 16px;
+            background-color: rgba(52, 152, 219, 0.12);
+            border: 1px solid rgba(52, 152, 219, 0.3);
+            border-radius: 9px;
+            color: #85c6ff;
+            font-size: 0.88rem;
+            font-weight: 500;
+        }
+        .supported-formats {
+            margin-top: 1rem;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+        }
+        .supported-formats strong { color: var(--text-dim); }
+        .submit-btn {
+            width: 100%;
+            height: 44px;
+            margin-top: 1.5rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            background-color: var(--green);
+            border-color: transparent;
+        }
+        .submit-btn:hover {
+            background-color: var(--green-dark);
+            border-color: transparent;
+        }
+        .or-divider {
+            margin: 2rem 0;
+            display: flex;
+            align-items: center;
+            text-align: center;
+            font-size: 0.74rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-faint);
+        }
+        .or-divider::before, .or-divider::after {
+            content: '';
+            flex: 1;
+            border-bottom: 1px solid var(--border);
+        }
+        .or-divider:not(:empty)::before { margin-right: .75em; }
+        .or-divider:not(:empty)::after { margin-left: .75em; }
+        .default-section { text-align: center; }
+        .default-section .btn {
+            background-color: var(--surface-hover);
+            color: var(--text);
+            border-color: transparent;
+            font-weight: 500;
+        }
+        .default-section .btn:hover {
+            background-color: #474747;
+            border-color: transparent;
+        }
+        #blocking-loader {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.7); display: flex;
+            justify-content: center; align-items: center; z-index: 9999;
+        }
+        #blocking-loader .loader-content {
+            background-color: var(--card-bg); border: 1px solid var(--border);
+            padding: 2rem; border-radius: var(--radius);
+            color: var(--text); text-align: center; box-shadow: var(--shadow-md);
+        }
+        #blocking-loader p { margin: 0; font-size: 1rem; color: var(--text-dim); }
+        .spinner {
+            border: 4px solid var(--border); border-top: 4px solid var(--green);
+            border-radius: 50%; width: 40px; height: 40px;
+            animation: spin 1s linear infinite; margin: 0 auto 1rem auto;
+        }
+        .hidden { display: none !important; }
+
+        /* --- Quellenauswahl: drei Reiter ueber den Panels ------------------ */
+        .source-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+        .source-tab {
+            flex: 1 1 160px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            height: 44px;
+            padding: 0 14px;
+            background-color: var(--surface-1);
+            color: var(--text-dim);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-pill);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.88rem;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+        }
+        .source-tab:hover:not(:disabled) {
+            background-color: var(--surface-hover);
+            color: var(--text);
+        }
+        .source-tab.is-active {
+            background-color: var(--green);
+            border-color: var(--green);
+            color: #fff;
+            font-weight: 600;
+        }
+        .source-tab:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+        .source-tab svg { width: 18px; height: 18px; flex: none; }
+
+        .panel-hint {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin: 0 0 1.25rem 0;
+            line-height: 1.5;
+        }
+        .panel-hint.warning { color: #e0b050; }
+
+        .pick-row { display: flex; gap: 10px; align-items: center; }
+        .pick-row .btn { flex: none; }
+
+        input[type="text"], input[type="search"] {
+            width: 100%;
+            height: 40px;
+            padding: 0 12px;
+            background-color: var(--surface-1);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-family: inherit;
+            font-size: 0.88rem;
+        }
+        input[type="text"]:focus, input[type="search"]:focus {
+            outline: none;
+            border-color: var(--green);
+        }
+        input[readonly] { color: var(--text-dim); font-family: monospace; }
+        .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .btn:disabled:hover { background-color: var(--green); }
+        .btn.secondary:disabled:hover { background-color: var(--surface-hover); }
+
+        .search-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+            margin-bottom: 1rem;
+        }
+        .search-grid label {
+            display: block;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-faint);
+            margin-bottom: 5px;
+        }
+
+        .result-list {
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            margin-top: 1.25rem;
+        }
+        .result-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 11px 14px;
+            border-bottom: 1px solid var(--border);
+            background-color: var(--surface-1);
+            font-size: 0.86rem;
+        }
+        .result-row:last-child { border-bottom: none; }
+        .result-row.study { cursor: pointer; }
+        .result-row.study:hover { background-color: var(--surface-2); }
+        .result-row.study.is-open { background-color: var(--surface-2); }
+        .result-row.series { background-color: #151515; padding-left: 34px; }
+        .result-main { flex: 1; min-width: 0; }
+        .result-title {
+            color: var(--text);
+            font-weight: 600;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .result-meta { color: var(--text-muted); font-size: 0.78rem; margin-top: 2px; }
+        .result-row .btn { height: 30px; padding: 0 14px; font-size: 0.8rem; }
+
+        .status-box {
+            margin-top: 1.25rem;
+            padding: 11px 16px;
+            border-radius: 9px;
+            font-size: 0.86rem;
+            line-height: 1.45;
+        }
+        .status-box.error {
+            background-color: rgba(200, 60, 60, 0.12);
+            border: 1px solid rgba(200, 60, 60, 0.35);
+            color: #f0a0a0;
+        }
+        .status-box.info {
+            background-color: rgba(52, 152, 219, 0.12);
+            border: 1px solid rgba(52, 152, 219, 0.3);
+            color: #85c6ff;
+        }
+
+        /* --- Modal mit dem iRODS-Browser der GUI in einem iframe ----------- */
+        .modal-overlay {
+            position: fixed; inset: 0; z-index: 9998;
+            background-color: rgba(0, 0, 0, 0.72);
+            display: flex; align-items: center; justify-content: center;
+            padding: 24px;
+        }
+        .modal-card {
+            width: min(1100px, 100%);
+            height: min(78vh, 100%);
+            display: flex;
+            flex-direction: column;
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-md);
+            overflow: hidden;
+        }
+        .modal-header {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; padding: 14px 18px;
+            border-bottom: 1px solid var(--border);
+        }
+        .modal-header h3 { margin: 0; font-size: 0.98rem; font-weight: 600; }
+        .modal-card iframe { flex: 1; width: 100%; border: 0; background: var(--page-bg); }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+    <h1>Interaktive Segmentierung medizinischer Bilddaten</h1>
+    
+    <div class="container">
+        <div class="main-card">
+            <div class="card-header">
+                <h2>Datenquelle wählen</h2>
+                <p>Laden Sie Daten vom eigenen Computer hoch, stagen Sie einen Ordner aus iRODS oder importieren Sie eine Serie aus der dcm4chee-Datenbank.</p>
+            </div>
+            <div class="card-body">
+                <div class="source-tabs" role="tablist">
+                    <button type="button" class="source-tab is-active" data-source="local" role="tab" aria-selected="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" />
+                        </svg>
+                        Eigener Computer
+                    </button>
+                    <button type="button" class="source-tab" data-source="irods" role="tab" aria-selected="false"
+                            {% if not embedded_in_gui %}disabled title="Nur innerhalb der InterACT-GUI verfügbar"{% endif %}>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75" />
+                        </svg>
+                        Staging aus iRODS
+                    </button>
+                    <button type="button" class="source-tab" data-source="dcm4chee" role="tab" aria-selected="false"
+                            {% if not embedded_in_gui %}disabled title="Nur innerhalb der InterACT-GUI verfügbar"{% endif %}>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                        </svg>
+                        dcm4chee-Datenbank
+                    </button>
+                </div>
+
+                {% if not embedded_in_gui %}
+                <p class="panel-hint warning">
+                    iRODS und die dcm4chee-Datenbank stehen nur zur Verfügung, wenn diese Seite
+                    im InterACT-GUI geöffnet wird &ndash; nur dort ist die Anmeldung vorhanden,
+                    unter der Ihre Zugriffsrechte geprüft und protokolliert werden.
+                </p>
+                {% endif %}
+
+                <!-- ============================ 1) Eigener Computer =========================== -->
+                <div class="source-panel" data-panel="local">
+                <form action="/upload" method="post" enctype="multipart/form-data" id="upload-form">
+                    <div id="drop-zone">
+                         <svg class="upload-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l-3.75 3.75M12 9.75l3.75 3.75M3 17.25V6.75A2.25 2.25 0 015.25 4.5h13.5A2.25 2.25 0 0121 6.75v10.5A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 17.25z" />
+                        </svg>
+                        <div class="upload-title">Dateien hierher ziehen</div>
+                        <div class="upload-description">oder wählen Sie eine Quelle aus</div>
+                        <div class="button-group">
+                            <label for="file-input" class="btn">Einzelne Datei</label>
+                            <input type="file" name="file" id="file-input" class="file-input" accept=".dcm,.dicom,.nii,.nii.gz,.nrrd,.zip,.7z">
+
+                            <label for="folder-input" class="btn secondary">DICOM-Ordner</label>
+                            <input type="file" name="files[]" id="folder-input" class="file-input" webkitdirectory directory multiple>
+                        </div>
+                         <div class="supported-formats">
+                            <strong>Unterstützt:</strong> DICOM, NIfTI (.nii, .nii.gz), NRRD (.nrrd), Archive (.zip, .7z)
+                        </div>
+                    </div>
+                    
+                    <div id="file-name-display" class="file-name-display hidden"></div>
+                    
+                    <button type="submit" id="submit-btn" class="btn submit-btn hidden">
+                        Hochladen & Segmentierung starten
+                    </button>
+                </form>
+                </div>
+
+                <!-- ============================ 2) Staging aus iRODS ========================== -->
+                <div class="source-panel hidden" data-panel="irods">
+                    <p class="panel-hint">
+                        Wählen Sie einen Ordner in Ihrem iRODS-Bereich. Der Ordner wird unter Ihrem
+                        eigenen iRODS-Konto gelesen und in den Arbeitsbereich dieser Sitzung kopiert.
+                        Unterstützt werden DICOM-Serien sowie NIfTI- und NRRD-Dateien.
+                    </p>
+                    <div class="pick-row">
+                        <input type="text" id="irods-path" readonly placeholder="Kein Ordner ausgewählt">
+                        <button type="button" class="btn secondary" id="irods-browse-btn">Browse&hellip;</button>
+                    </div>
+                    <button type="button" id="irods-stage-btn" class="btn submit-btn" disabled>
+                        Aus iRODS laden &amp; Segmentierung starten
+                    </button>
+                    <div id="irods-status" class="status-box error hidden"></div>
+                </div>
+
+                <!-- ========================= 3) Import aus dcm4chee =========================== -->
+                <div class="source-panel hidden" data-panel="dcm4chee">
+                    <p class="panel-hint">
+                        Suchen Sie eine Studie und importieren Sie daraus eine Serie. Die Abfrage
+                        läuft über die angemeldete Sitzung des GUI, so dass Ihre Zugriffe wie im
+                        Rest der Plattform protokolliert werden.
+                    </p>
+                    <form id="pacs-search-form">
+                        <div class="search-grid">
+                            <div>
+                                <label for="pacs-patient-name">Patient Name</label>
+                                <input type="search" id="pacs-patient-name" placeholder="z. B. Mustermann">
+                            </div>
+                            <div>
+                                <label for="pacs-patient-id">Patient ID</label>
+                                <input type="search" id="pacs-patient-id" placeholder="z. B. 12345">
+                            </div>
+                            <div>
+                                <label for="pacs-accession">Accession-Nr.</label>
+                                <input type="search" id="pacs-accession" placeholder="z. B. A0001">
+                            </div>
+                            <div>
+                                <label for="pacs-date">Study date</label>
+                                <input type="search" id="pacs-date" placeholder="20240101-20241231">
+                            </div>
+                        </div>
+                        <button type="submit" class="btn submit-btn" style="margin-top:0.5rem;">Search studies</button>
+                    </form>
+                    <div id="pacs-status" class="status-box info hidden"></div>
+                    <div id="pacs-results" class="result-list hidden"></div>
+                </div>
+
+
+            </div>
+        </div>
+    </div>
+    
+    <div id="irods-picker-modal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>iRODS-Ordner wählen</h3>
+                <button type="button" class="btn secondary" id="irods-picker-close">Schließen</button>
+            </div>
+            <!-- src wird per JS gesetzt: als HTML-Attribut wuerde der GUI-Reverse-Proxy
+                 den absoluten Pfad auf /proxy/colleague/ umschreiben und ihn damit auf
+                 diesen Container statt auf das GUI zeigen lassen. -->
+            <iframe id="irods-picker-frame" title="iRODS-Ordnerauswahl"></iframe>
+        </div>
+    </div>
+
+    <div id="blocking-loader" class="hidden">
+        <div class="loader-content">
+            <div class="spinner"></div>
+            <p id="loader-message">Verarbeite...</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadForm = document.getElementById('upload-form');
+            const fileInput = document.getElementById('file-input');
+            const folderInput = document.getElementById('folder-input');
+            const fileNameDiv = document.getElementById('file-name-display');
+            const submitBtn = document.getElementById('submit-btn');
+            const dropZone = document.getElementById('drop-zone');
+            const blockingLoader = document.getElementById('blocking-loader');
+            const loaderMessage = document.getElementById('loader-message');
+
+            // ================================================================
+            // Gemeinsame Helfer
+            // ================================================================
+
+            // Endpunkte des GUI, nicht dieses Containers. Sie stehen nur im
+            // GUI-iframe (/proxy/colleague/) unter derselben Origin zur
+            // Verfuegung - dieser Container selbst kennt weder iRODS noch
+            // dcm4chee; die Reiter sind ausserhalb des GUI deaktiviert.
+            // Sie duerfen nirgends als href/src/action im Markup stehen: der
+            // Reverse-Proxy des GUI wuerde ihnen /proxy/colleague/ voranstellen.
+            const GUI_IRODS_PICKER = '/irods/browse/?picker=1&embedded=1';
+            const GUI_IRODS_DOWNLOAD_FOLDER = '/irods/download_folder/';
+            const GUI_DICOMWEB = '/dcm4chee-proxy/dcm4chee-arc/aets/DCM4CHEE/rs';
+
+            function showLoader(message) {
+                loaderMessage.textContent = message;
+                blockingLoader.classList.remove('hidden');
+            }
+
+            function hideLoader() {
+                blockingLoader.classList.add('hidden');
+            }
+
+            function setStatus(el, message, isError) {
+                if (!message) {
+                    el.classList.add('hidden');
+                    el.textContent = '';
+                    return;
+                }
+                el.textContent = message;
+                el.classList.toggle('error', !!isError);
+                el.classList.toggle('info', !isError);
+                el.classList.remove('hidden');
+            }
+
+            function safeFilename(name, fallback) {
+                const cleaned = (name || '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+                return cleaned || fallback;
+            }
+
+            // Ein Upload-POST fuer alle drei Quellen. Gibt bei Erfolg nichts
+            // zurueck (die Seite navigiert dann bereits zum Viewer), sonst die
+            // Fehlermeldung - wie sie angezeigt wird, entscheidet der Aufrufer.
+            async function postUpload(fd) {
+                try {
+                    const resp = await fetch('/upload', {
+                        method: 'POST', body: fd, redirect: 'follow', credentials: 'same-origin'
+                    });
+                    if (resp.redirected) {
+                        window.location.href = resp.url;
+                        return null;
+                    }
+                    if (resp.ok) {
+                        window.location.href = '/dicom_viewer';
+                        return null;
+                    }
+                    const err = await resp.json().catch(() => ({}));
+                    return err.error || resp.statusText;
+                } catch (err) {
+                    return String(err);
+                }
+            }
+
+            // Holt ein ZIP von einem GUI-Endpunkt und schiebt es durch denselben
+            // /upload-Weg wie ein manuell hochgeladenes Archiv. Der Browser ist
+            // hier bewusst die Zwischenstation: nur er hat die Keycloak-Sitzung,
+            // unter der das GUI die Rechte prueft und den Zugriff protokolliert.
+            async function stageArchive(url, headers, filename, message, statusEl, source) {
+                setStatus(statusEl, '', false);
+                showLoader(message);
+
+                let blob;
+                try {
+                    const resp = await fetch(url, {headers: headers, credentials: 'same-origin'});
+                    if (!resp.ok) {
+                        hideLoader();
+                        setStatus(statusEl, (resp.status === 401 || resp.status === 403)
+                            ? 'Kein Zugriff (HTTP ' + resp.status + '). Bitte im InterACT-GUI neu anmelden.'
+                            : 'Laden fehlgeschlagen (HTTP ' + resp.status + ').', true);
+                        return;
+                    }
+                    const contentType = (resp.headers.get('Content-Type') || '').toLowerCase();
+                    if (contentType.indexOf('zip') === -1) {
+                        // z. B. die Flash-Weiterleitung des iRODS-Browsers bei
+                        // einem leeren Ordner - kommt als HTML zurueck, nicht als Fehler.
+                        hideLoader();
+                        setStatus(statusEl, 'Es kamen keine Bilddaten zurück. Der Ordner ist vermutlich leer oder nicht lesbar.', true);
+                        return;
+                    }
+                    blob = await resp.blob();
+                } catch (err) {
+                    hideLoader();
+                    setStatus(statusEl, 'Laden fehlgeschlagen: ' + err, true);
+                    return;
+                }
+
+                if (!blob.size) {
+                    hideLoader();
+                    setStatus(statusEl, 'Der Datensatz ist leer.', true);
+                    return;
+                }
+
+                loaderMessage.textContent = 'Daten werden übernommen und verarbeitet...';
+                const fd = new FormData();
+                fd.append('file', blob, filename);
+                // Die Herkunft kennt nur der Browser - im Container kommt beides
+                // als gewoehnliches ZIP an. Sie entscheidet spaeter, ob das
+                // Segmentierungsergebnis auch als DICOM-SEG in die Datenbank
+                // zurueckgeschrieben werden kann.
+                fd.append('source', source);
+                const error = await postUpload(fd);
+                if (error) {
+                    hideLoader();
+                    setStatus(statusEl, 'Import fehlgeschlagen: ' + error, true);
+                }
+            }
+
+            // ================================================================
+            // Reiter der drei Datenquellen
+            // ================================================================
+            const sourceTabs = Array.from(document.querySelectorAll('.source-tab'));
+            const sourcePanels = Array.from(document.querySelectorAll('.source-panel'));
+
+            sourceTabs.forEach(function (tab) {
+                tab.addEventListener('click', function () {
+                    if (tab.disabled) return;
+                    sourceTabs.forEach(function (other) {
+                        const active = other === tab;
+                        other.classList.toggle('is-active', active);
+                        other.setAttribute('aria-selected', active ? 'true' : 'false');
+                    });
+                    sourcePanels.forEach(function (panel) {
+                        panel.classList.toggle('hidden', panel.dataset.panel !== tab.dataset.source);
+                    });
+                });
+            });
+
+            // Puffer für per Drag&Drop gesammelte Ordner-Einträge (mit relativen Pfaden)
+            let droppedFolderEntries = null; // [{file, relpath}]
+
+            function updateFileDisplay(files) {
+                if (files && files.length > 0) {
+                    fileNameDiv.classList.remove('hidden');
+                    if (files.length === 1) {
+                        fileNameDiv.innerHTML = `<strong>Ausgewählt:</strong> ${files[0].name}`;
+                    } else {
+                        const dicomCount = Array.from(files).filter(file => 
+                            file.name.toLowerCase().endsWith('.dcm') || file.name.toLowerCase().endsWith('.dicom')
+                        ).length;
+                        fileNameDiv.innerHTML = `<strong>Ausgewählt:</strong> ${files.length} Dateien (${dicomCount} DICOM)`;
+                    }
+                    submitBtn.classList.remove('hidden');
+                } else {
+                    fileNameDiv.classList.add('hidden');
+                    submitBtn.classList.add('hidden');
+                }
+            }
+
+            fileInput.addEventListener('change', () => {
+                folderInput.value = '';
+                droppedFolderEntries = null;
+                updateFileDisplay(fileInput.files);
+            });
+
+            folderInput.addEventListener('change', () => {
+                fileInput.value = '';
+                droppedFolderEntries = null;
+                updateFileDisplay(folderInput.files);
+            });
+
+            // --- Rekursives Einlesen eines per Drag&Drop abgelegten Ordners ---
+            function readEntry(entry, pathPrefix = '') {
+                return new Promise((resolve) => {
+                    if (entry.isFile) {
+                        entry.file(file => {
+                            resolve([{file, relpath: pathPrefix + entry.name}]);
+                        }, () => resolve([]));
+                    } else if (entry.isDirectory) {
+                        const reader = entry.createReader();
+                        const all = [];
+                        const readBatch = () => {
+                            reader.readEntries(async (entries) => {
+                                if (!entries.length) {
+                                    resolve(all);
+                                    return;
+                                }
+                                for (const e of entries) {
+                                    const sub = await readEntry(e, pathPrefix + entry.name + '/');
+                                    all.push(...sub);
+                                }
+                                readBatch();
+                            }, () => resolve(all));
+                        };
+                        readBatch();
+                    } else {
+                        resolve([]);
+                    }
+                });
+            }
+
+            // --- NEU: Drag & Drop Event Listeners ---
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.add('drag-over');
+            });
+
+            dropZone.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.remove('drag-over');
+            });
+
+            dropZone.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.remove('drag-over');
+
+                const items = e.dataTransfer.items;
+                // Wenn mindestens ein Ordner dabei ist → rekursiv einlesen (mit Pfadstruktur)
+                if (items && items.length && items[0].webkitGetAsEntry) {
+                    const entries = [];
+                    for (let i = 0; i < items.length; i++) {
+                        const entry = items[i].webkitGetAsEntry();
+                        if (entry) entries.push(entry);
+                    }
+                    const hasDir = entries.some(en => en && en.isDirectory);
+                    if (hasDir) {
+                        loaderMessage.textContent = 'Ordner wird eingelesen...';
+                        blockingLoader.classList.remove('hidden');
+                        try {
+                            const collected = [];
+                            for (const en of entries) {
+                                const sub = await readEntry(en, '');
+                                collected.push(...sub);
+                            }
+                            blockingLoader.classList.add('hidden');
+                            if (collected.length === 0) return;
+                            droppedFolderEntries = collected;
+                            fileInput.value = '';
+                            folderInput.value = '';
+                            // Anzeige: Anzahl + DICOM-Zählung
+                            const dicomCount = collected.filter(c => {
+                                const n = c.file.name.toLowerCase();
+                                return n.endsWith('.dcm') || n.endsWith('.dicom') || !n.includes('.');
+                            }).length;
+                            fileNameDiv.classList.remove('hidden');
+                            fileNameDiv.innerHTML = `<strong>Ausgewählter Ordner:</strong> ${collected.length} Dateien (${dicomCount} DICOM)`;
+                            submitBtn.classList.remove('hidden');
+                            return;
+                        } catch (err) {
+                            blockingLoader.classList.add('hidden');
+                            console.error(err);
+                        }
+                    }
+                }
+
+                // Fallback: einzelne Dateien (kein Ordner)
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    droppedFolderEntries = null;
+                    const isDicomSeries = files.length > 1 && Array.from(files).some(f => f.name.toLowerCase().endsWith('.dcm') || f.name.toLowerCase().endsWith('.dicom'));
+                    if (isDicomSeries) {
+                        folderInput.files = files;
+                        fileInput.value = '';
+                        updateFileDisplay(folderInput.files);
+                    } else {
+                        fileInput.files = files;
+                        folderInput.value = '';
+                        updateFileDisplay(fileInput.files);
+                    }
+                }
+            });
+
+            if (uploadForm) {
+                uploadForm.addEventListener('submit', async function(ev) {
+                    // Fall 1: per Drag&Drop gesammelter Ordner → manuell FormData mit relpath bauen
+                    if (droppedFolderEntries && droppedFolderEntries.length) {
+                        ev.preventDefault();
+                        showLoader('Daten werden hochgeladen und verarbeitet...');
+                        const fd = new FormData();
+                        for (const c of droppedFolderEntries) {
+                            fd.append('files[]', c.file, c.relpath);
+                        }
+                        const error = await postUpload(fd);
+                        if (error) {
+                            hideLoader();
+                            alert('Upload fehlgeschlagen: ' + error);
+                        }
+                        return;
+                    }
+
+                    // Fall 2: Ordner-Input (webkitdirectory) → manuell senden, damit webkitRelativePath erhalten bleibt
+                    if (folderInput.files && folderInput.files.length > 0) {
+                        ev.preventDefault();
+                        showLoader('Daten werden hochgeladen und verarbeitet...');
+                        const fd = new FormData();
+                        for (const f of folderInput.files) {
+                            fd.append('files[]', f, f.webkitRelativePath || f.name);
+                        }
+                        const error = await postUpload(fd);
+                        if (error) {
+                            hideLoader();
+                            alert('Upload fehlgeschlagen: ' + error);
+                        }
+                        return;
+                    }
+
+                    // Fall 3: Einzeldatei / ZIP / 7z → Standard-Submit
+                    if (fileInput.files.length > 0) {
+                        showLoader('Daten werden hochgeladen und verarbeitet...');
+                    }
+                });
+            }
+
+            // ================================================================
+            // 2) Staging aus iRODS
+            //
+            // Der Ordner wird nicht von diesem Container geholt, sondern vom
+            // Browser ueber /irods/download_folder/ des GUI. Das GUI leitet
+            // dabei das Keycloak-Token des angemeldeten Menschen an die iRODS
+            // HTTP-API weiter, so dass dessen echte ACLs greifen und der
+            // Zugriff im PHI-Audit landet - siehe
+            // docker-context-gui/app/utils/irods_client.py.
+            // ================================================================
+            const irodsPathInput = document.getElementById('irods-path');
+            const irodsStageBtn = document.getElementById('irods-stage-btn');
+            const irodsStatus = document.getElementById('irods-status');
+            const irodsBrowseBtn = document.getElementById('irods-browse-btn');
+            const pickerModal = document.getElementById('irods-picker-modal');
+            const pickerFrame = document.getElementById('irods-picker-frame');
+
+            function closePicker() {
+                pickerModal.classList.add('hidden');
+                pickerFrame.setAttribute('src', 'about:blank');
+            }
+
+            if (irodsBrowseBtn) {
+                irodsBrowseBtn.addEventListener('click', function () {
+                    pickerFrame.setAttribute('src', GUI_IRODS_PICKER);
+                    pickerModal.classList.remove('hidden');
+                });
+                document.getElementById('irods-picker-close').addEventListener('click', closePicker);
+                pickerModal.addEventListener('click', function (e) {
+                    if (e.target === pickerModal) closePicker();
+                });
+            }
+
+            // Der iRODS-Browser des GUI meldet die Auswahl per postMessage an
+            // das einbettende Fenster - dasselbe Protokoll nutzt batch.html.
+            window.addEventListener('message', function (e) {
+                if (e.origin !== window.location.origin) return;
+                if (!e.data || e.data.type !== 'irods-folder-picked') return;
+                irodsPathInput.value = e.data.path;
+                irodsStageBtn.disabled = false;
+                setStatus(irodsStatus, '', false);
+                closePicker();
+            });
+
+            if (irodsStageBtn) {
+                irodsStageBtn.addEventListener('click', function () {
+                    const segments = (irodsPathInput.value || '').split('/').filter(Boolean);
+                    if (!segments.length) return;
+                    const url = GUI_IRODS_DOWNLOAD_FOLDER + segments.map(encodeURIComponent).join('/');
+                    const name = safeFilename(segments[segments.length - 1], 'irods_import');
+                    stageArchive(url, {}, name + '.zip',
+                        'Ordner wird aus iRODS geladen...', irodsStatus, 'irods');
+                });
+            }
+
+            // ================================================================
+            // 3) Import aus der dcm4chee-Datenbank
+            //
+            // QIDO-RS fuer die Suche, WADO-RS fuer den Abruf - beides ueber
+            // /dcm4chee-proxy/ des GUI, das als einzige Stelle weiss, wer
+            // fragt, und den Zugriff protokolliert (dcm4chee selbst hat in
+            // diesem Aufbau keine eigene Authentifizierung).
+            // ================================================================
+            const pacsForm = document.getElementById('pacs-search-form');
+            const pacsStatus = document.getElementById('pacs-status');
+            const pacsResults = document.getElementById('pacs-results');
+
+            // Ein DICOM-JSON-Attribut als Text; PN-Werte kommen als
+            // {Alphabetic: "..."} statt als blanker String zurueck.
+            function dicomValue(item, tag) {
+                const attr = item[tag];
+                if (!attr || !attr.Value || !attr.Value.length) return '';
+                const value = attr.Value[0];
+                if (value && typeof value === 'object') return value.Alphabetic || '';
+                return String(value);
+            }
+
+            function withWildcards(value) {
+                const trimmed = (value || '').trim();
+                if (!trimmed) return '';
+                return /[*?]/.test(trimmed) ? trimmed : '*' + trimmed + '*';
+            }
+
+            function formatDicomDate(value) {
+                return /^\d{8}$/.test(value)
+                    ? value.slice(6, 8) + '.' + value.slice(4, 6) + '.' + value.slice(0, 4)
+                    : value;
+            }
+
+            async function qido(path, params) {
+                const query = params.toString();
+                const resp = await fetch(GUI_DICOMWEB + path + (query ? '?' + query : ''), {
+                    headers: {'Accept': 'application/dicom+json'},
+                    credentials: 'same-origin'
+                });
+                if (resp.status === 204) return [];          // QIDO-RS: keine Treffer
+                if (resp.status === 401 || resp.status === 403) {
+                    throw new Error('Kein Zugriff auf die Datenbank. Bitte im InterACT-GUI neu anmelden.');
+                }
+                if (!resp.ok) throw new Error('Die Datenbank antwortete mit HTTP ' + resp.status + '.');
+                return await resp.json();
+            }
+
+            function makeRow(cssClass, title, meta) {
+                const row = document.createElement('div');
+                row.className = 'result-row ' + cssClass;
+                const main = document.createElement('div');
+                main.className = 'result-main';
+                const titleEl = document.createElement('div');
+                titleEl.className = 'result-title';
+                titleEl.textContent = title;             // Patientendaten nie als HTML einsetzen
+                const metaEl = document.createElement('div');
+                metaEl.className = 'result-meta';
+                metaEl.textContent = meta;
+                main.appendChild(titleEl);
+                main.appendChild(metaEl);
+                row.appendChild(main);
+                return row;
+            }
+
+            async function toggleSeries(studyRow, studyUid) {
+                // Bereits ausgeklappt: Serienzeilen wieder einsammeln.
+                if (studyRow.classList.contains('is-open')) {
+                    studyRow.classList.remove('is-open');
+                    (studyRow._seriesRows || []).forEach(function (r) { r.remove(); });
+                    studyRow._seriesRows = null;
+                    return;
+                }
+
+                const params = new URLSearchParams();
+                ['0020000E', '00200011', '00080060', '0008103E', '00201209'].forEach(function (tag) {
+                    params.append('includefield', tag);
+                });
+
+                let series;
+                try {
+                    series = await qido('/studies/' + encodeURIComponent(studyUid) + '/series', params);
+                } catch (err) {
+                    setStatus(pacsStatus, String(err.message || err), true);
+                    return;
+                }
+
+                series.sort(function (a, b) {
+                    return (parseInt(dicomValue(a, '00200011'), 10) || 0)
+                         - (parseInt(dicomValue(b, '00200011'), 10) || 0);
+                });
+
+                const rows = [];
+                if (!series.length) {
+                    rows.push(makeRow('series', 'Keine Serien in dieser Studie', ''));
+                }
+                series.forEach(function (item) {
+                    const seriesUid = dicomValue(item, '0020000E');
+                    const number = dicomValue(item, '00200011');
+                    const modality = dicomValue(item, '00080060');
+                    const description = dicomValue(item, '0008103E');
+                    const count = dicomValue(item, '00201209');
+
+                    const row = makeRow(
+                        'series',
+                        (number ? 'Serie ' + number : 'Serie') + (description ? ' – ' + description : ''),
+                        [modality, count ? count + ' Bilder' : ''].filter(Boolean).join(' · ')
+                    );
+
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'btn';
+                    button.textContent = 'Importieren';
+                    button.addEventListener('click', function () {
+                        const filename = safeFilename(
+                            'dcm4chee_serie_' + (number || seriesUid.slice(-8)), 'dcm4chee_serie');
+                        stageArchive(
+                            GUI_DICOMWEB + '/studies/' + encodeURIComponent(studyUid)
+                                         + '/series/' + encodeURIComponent(seriesUid),
+                            {'Accept': 'application/zip'},
+                            filename + '.zip',
+                            'Serie wird aus der dcm4chee-Datenbank geladen...',
+                            pacsStatus,
+                            'dcm4chee'
+                        );
+                    });
+                    row.appendChild(button);
+                    rows.push(row);
+                });
+
+                rows.reverse().forEach(function (row) {
+                    studyRow.parentNode.insertBefore(row, studyRow.nextSibling);
+                });
+                studyRow._seriesRows = rows;
+                studyRow.classList.add('is-open');
+            }
+
+            if (pacsForm) {
+                pacsForm.addEventListener('submit', async function (ev) {
+                    ev.preventDefault();
+
+                    const params = new URLSearchParams();
+                    params.set('limit', '100');
+                    ['00100010', '00100020', '00080020', '00081030', '00080061', '0020000D', '00201208']
+                        .forEach(function (tag) { params.append('includefield', tag); });
+
+                    const patientId = withWildcards(document.getElementById('pacs-patient-id').value);
+                    const patientName = withWildcards(document.getElementById('pacs-patient-name').value);
+                    const accession = withWildcards(document.getElementById('pacs-accession').value);
+                    const studyDate = document.getElementById('pacs-date').value.trim();
+                    if (patientId) params.set('PatientID', patientId);
+                    if (patientName) params.set('PatientName', patientName);
+                    if (accession) params.set('AccessionNumber', accession);
+                    if (studyDate) params.set('StudyDate', studyDate);
+
+                    pacsResults.textContent = '';
+                    pacsResults.classList.add('hidden');
+                    setStatus(pacsStatus, 'Suche läuft...', false);
+
+                    let studies;
+                    try {
+                        studies = await qido('/studies', params);
+                    } catch (err) {
+                        setStatus(pacsStatus, String(err.message || err), true);
+                        return;
+                    }
+
+                    if (!studies.length) {
+                        setStatus(pacsStatus, 'Keine Studien zu dieser Suche gefunden.', false);
+                        return;
+                    }
+
+                    setStatus(pacsStatus, studies.length + ' Studie(n) gefunden – Studie anklicken, um die Serien zu sehen.', false);
+
+                    studies.forEach(function (study) {
+                        const studyUid = dicomValue(study, '0020000D');
+                        if (!studyUid) return;
+                        const row = makeRow(
+                            'study',
+                            [dicomValue(study, '00100010'), dicomValue(study, '00100020')]
+                                .filter(Boolean).join(' · ') || 'Unbenannte Studie',
+                            [
+                                formatDicomDate(dicomValue(study, '00080020')),
+                                dicomValue(study, '00081030'),
+                                dicomValue(study, '00080061'),
+                                dicomValue(study, '00201208') ? dicomValue(study, '00201208') + ' Bilder' : ''
+                            ].filter(Boolean).join(' · ')
+                        );
+                        row.addEventListener('click', function (e) {
+                            if (e.target.tagName === 'BUTTON') return;
+                            toggleSeries(row, studyUid);
+                        });
+                        pacsResults.appendChild(row);
+                    });
+                    pacsResults.classList.remove('hidden');
+                });
+            }
+        });
+    </script>
+</body>
+</html>

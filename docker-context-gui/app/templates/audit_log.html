@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  /* PHI access log: the reason banner and the per-cell / per-action colour
+     coding are specific to this page. Container, card, filter form, table,
+     badges, buttons and the empty state are all shared now. */
+  .page-header { justify-content: space-between; flex-wrap: wrap; }
+
+  .reason-banner {
+    display: flex; justify-content: space-between; align-items: center;
+    gap: 14px; flex-wrap: wrap;
+    background: rgba(243,156,18,0.10); border: 1px solid rgba(243,156,18,0.3);
+    border-radius: var(--radius); padding: 12px 18px; margin-bottom: 16px;
+  }
+  .reason-banner-text {
+    display: flex; align-items: center; gap: 10px;
+    color: #ddd; font-size: 0.88rem; line-height: 1.5;
+  }
+  .reason-banner-text i { color: #f0a939; }
+  .reason-banner-text strong { color: var(--text); }
+  .reason-expiry { color: var(--text-muted); }
+
+  .result-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 10px; margin-bottom: 14px;
+  }
+  .result-count { color: var(--text-dim); font-size: 0.9rem; }
+  .result-count strong { color: var(--text); }
+  .truncation-note { color: var(--warn); font-size: 0.85rem; }
+
+  .cell-ts { white-space: nowrap; color: #aaa; font-family: monospace; font-size: 0.82rem; }
+  .cell-actor { font-weight: 600; color: var(--text); white-space: nowrap; }
+  .cell-ip { color: #777; font-family: monospace; font-size: 0.78rem; }
+  .cell-object {
+    font-family: monospace; font-size: 0.8rem; color: var(--text-dim);
+    word-break: break-all; max-width: 520px;
+  }
+  .cell-detail { color: var(--text-muted); font-size: 0.8rem; max-width: 280px; word-break: break-word; }
+  .cell-reason { color: #f0a939; font-size: 0.8rem; margin-top: 3px; }
+
+  /* Source-system and action badges, on top of the shared .badge base. */
+  .sys-irods { background: rgba(155,89,182,0.18); color: #c39bd3; }
+  .sys-api   { background: rgba(26,188,156,0.18); color: #5fd3bc; }
+  .act-view, .act-list, .act-search { background: var(--surface-hover); color: #ddd; }
+  .act-download, .act-export { background: var(--warn-bg); color: #f0a939; }
+  .act-upload, .act-modify { background: rgba(46,204,113,0.18); color: #4cd787; }
+  .act-delete, .act-permission_change, .act-account_admin { background: var(--danger-bg); color: #e8695c; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-container">
+
+    <div class="page-header">
+        <div class="icon-badge"><i class="fa-solid fa-clipboard-list"></i></div>
+        <div style="flex: 1;">
+            <h2>PHI Access Log</h2>
+            <p class="page-sub">
+                Who viewed, searched, downloaded and edited patient data in dcm4chee and iRODS
+            </p>
+        </div>
+        <a class="btn btn-primary"
+           href="{{ url_for('audit_log.export_csv',
+                            actor=filters.actor, system=filters.system,
+                            action=filters.action, q=filters.contains,
+                            since=filters.since.isoformat() if filters.since else None,
+                            until=filters.until.isoformat() if filters.until else None,
+                            days=days) }}">
+            <i class="fa-solid fa-file-csv"></i> Export CSV
+        </a>
+    </div>
+
+    <div class="reason-banner">
+        <div class="reason-banner-text">
+            <i class="fa-solid fa-user-shield"></i>
+            <span>
+                Access reason: <strong>{{ access_reason }}</strong>
+                <span class="reason-expiry">— recorded in the trail; you will be asked again in
+                {{ reason_expires_in }} min</span>
+            </span>
+        </div>
+        <form method="POST" action="{{ url_for('audit_log.end_session') }}">
+            <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+            <button type="submit" class="btn btn-secondary">
+                <i class="fa-solid fa-lock"></i> End session
+            </button>
+        </form>
+    </div>
+
+    <div class="card card--compact">
+        <form class="inline-form" method="GET">
+            <input type="hidden" name="embedded" value="{{ '1' if embedded else '' }}">
+
+            <div class="filter-field">
+                <label for="f-actor">User</label>
+                <input type="text" id="f-actor" name="actor" list="actor-options"
+                       value="{{ filters.actor or '' }}" placeholder="any user">
+                <datalist id="actor-options">
+                    {% for name in actors %}<option value="{{ name }}">{% endfor %}
+                </datalist>
+            </div>
+
+            <div class="filter-field">
+                <label for="f-system">System</label>
+                <select id="f-system" name="system">
+                    <option value="">any</option>
+                    {% for name in systems %}
+                    <option value="{{ name }}" {% if filters.system == name %}selected{% endif %}>{{ name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="filter-field">
+                <label for="f-action">Action</label>
+                <select id="f-action" name="action">
+                    <option value="">any</option>
+                    {% for name in actions %}
+                    <option value="{{ name }}" {% if filters.action == name %}selected{% endif %}>{{ name.replace('_', ' ') }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="filter-field">
+                <label for="f-since">From</label>
+                <input type="date" id="f-since" name="since"
+                       value="{{ filters.since.isoformat() if filters.since else '' }}">
+            </div>
+
+            <div class="filter-field">
+                <label for="f-until">To</label>
+                <input type="date" id="f-until" name="until"
+                       value="{{ filters.until.isoformat() if filters.until else '' }}">
+            </div>
+
+            <div class="filter-field grow">
+                <label for="f-q">Contains</label>
+                <input type="text" id="f-q" name="q" value="{{ filters.contains or '' }}"
+                       placeholder="patient ID, study UID, iRODS path, IP address...">
+            </div>
+
+            <button type="submit" class="btn btn-primary">
+                <i class="fa-solid fa-magnifying-glass"></i> Filter
+            </button>
+            <a class="btn btn-secondary" href="{{ url_for('audit_log.index', embedded='1' if embedded else None) }}">
+                Reset
+            </a>
+        </form>
+    </div>
+
+    <div class="result-bar">
+        <div class="result-count">
+            {% if truncated %}
+                Showing the newest <strong>{{ shown }}</strong> of <strong>{{ total }}</strong> matching records
+            {% else %}
+                <strong>{{ total }}</strong> matching record{{ 's' if total != 1 else '' }}
+            {% endif %}
+            {% if days %}&middot; last {{ days }} day{{ 's' if days != 1 else '' }}{% endif %}
+        </div>
+        {% if truncated %}
+        <div class="truncation-note">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            Narrow the filter or export to CSV for the complete set.
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="card card--flush">
+        {% if events %}
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>User</th>
+                        <th>System</th>
+                        <th>Action</th>
+                        <th>Object</th>
+                        <th>Outcome</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for event in events %}
+                    <tr>
+                        <td class="cell-ts" title="{{ event.ts }} (UTC, as stored)">{{ event.ts | localtime }}</td>
+                        <td>
+                            <div class="cell-actor">{{ event.actor }}</div>
+                            {% if event.actor_ip %}<div class="cell-ip">{{ event.actor_ip }}</div>{% endif %}
+                        </td>
+                        <td><span class="badge sys-{{ event.system }}">{{ event.system }}</span></td>
+                        <td><span class="badge act-{{ event.action }}">{{ event.action.replace('_', ' ') }}</span></td>
+                        <td class="cell-object">
+                            {{ event.get('object') or '—' }}
+                            {% if event.get('criteria') %}<div class="cell-detail">? {{ event.criteria }}</div>{% endif %}
+                        </td>
+                        <td class="out-{{ event.outcome }}">{{ event.outcome }}</td>
+                        <td class="cell-detail">
+                            {% if event.get('patient_id') %}<div>Patient {{ event.patient_id }}</div>{% endif %}
+                            {% if event.get('study_uid') %}<div>Study {{ event.study_uid }}</div>{% endif %}
+                            {% if event.get('series_uid') %}<div>Series {{ event.series_uid }}</div>{% endif %}
+                            {% if event.get('count') is not none %}<div>{{ event.count }} item{{ 's' if event.count != 1 else '' }}</div>{% endif %}
+                            {% if event.get('detail') %}<div>{{ event.detail }}</div>{% endif %}
+                            {% if event.get('reason') %}<div class="cell-reason">Reason: {{ event.reason }}</div>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <i class="fa-solid fa-clipboard-list"></i>
+            No records match this filter.
+            {% if not available_days %}
+            <p class="hint">No audit files exist yet under <code>{{ log_dir }}</code>.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+    {% if not nginx_available %}
+    <div class="alert alert-warning" style="margin-top:18px;">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <strong>Incomplete:</strong> the nginx trail at <code>{{ nginx_log }}</code> is not
+        readable, so studies opened in the OHIF viewer are missing from this table. They are
+        still being recorded — check the volume mount in <code>docker-compose.yml</code>.
+    </div>
+    {% endif %}
+
+    <p class="hint">
+        This page merges two sources. This app's own records — iRODS, the PACS search, the
+        batch API — are appended to <code>{{ log_dir }}/phi-access-&lt;date&gt;.jsonl</code>.
+        OHIF's traffic to dcm4chee never reaches this app and is recorded by nginx in
+        <code>{{ nginx_log }}</code>; rows from there are marked <code>nginx</code> in the CSV
+        export's <code>source</code> column.
+        Opening one study is hundreds of image requests, so repeated views of the same study by
+        the same person within {{ collapse_minutes }} minutes are shown as a single row with a
+        request count — the underlying file keeps every individual request.
+        Times are shown in server local time; both logs store UTC, which is what the CSV's
+        <code>ts</code> column carries (<code>ts_local</code> has the converted value).
+        Neither log is ever rewritten from the web app.
+        {% if retention_days %}
+        Files older than {{ retention_days }} days are removed automatically.
+        {% else %}
+        No automatic deletion is configured — set <code>AUDIT_RETENTION_DAYS</code> to enable it.
+        {% endif %}
+        See <code>Documentation/GUI.md</code>, "PHI access audit trail".
+    </p>
+
+</div>
+{% endblock %}

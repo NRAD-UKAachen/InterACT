@@ -1,0 +1,12 @@
+# Large binary assets go through git-lfs.
+#
+# Attributes apply when a file is ADDED, not retroactively -- if you ever need
+# to convert files already in the index, unstage and re-add them (or run
+# `git add --renormalize .`).
+
+# Imaging volumes and model weights, repo-wide.
+*.nii.gz  filter=lfs diff=lfs merge=lfs -text
+*.nii     filter=lfs diff=lfs merge=lfs -text
+*.pt      filter=lfs diff=lfs merge=lfs -text
+*.pth     filter=lfs diff=lfs merge=lfs -text
+*.onnx    filter=lfs diff=lfs merge=lfs -text

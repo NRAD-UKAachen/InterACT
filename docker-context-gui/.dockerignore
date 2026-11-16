@@ -1,0 +1,44 @@
+# VCS
+.git
+**/.git
+.gitmodules
+.gitignore
+
+# Python
+.venv
+**/.venv
+venv
+__pycache__/
+*.pyc
+*.pyo
+
+# Node
+node_modules/
+*.log
+
+# Caches
+.cache/
+.mypy_cache/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Large data & artifacts
+data/
+datasets/
+nifti_inputs/
+static/seg_results/
+*.nii
+*.nii.gz
+*.dcm
+*.nrrd
+*.zip
+*.tar
+*.tar.gz
+
+# Build outputs
+dist/
+build/
+**/build/
+
+# Submodules / libs you don’t need in image
+niivue/
